@@ -93,7 +93,7 @@ interface AppState {
   backendMessage: string;
 
   // 当前激活页面
-  activePage: "quality" | "viewer" | "convert" | "labels" | "files" | "split" | "export" | "merge" | "augment";
+  activePage: "quality" | "viewer" | "convert" | "labels" | "files" | "split" | "export" | "merge" | "augment" | "video";
 
   // 当前数据集上下文（跨页面共享）
   currentDatasetDir: string;
