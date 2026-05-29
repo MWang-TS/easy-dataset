@@ -1,0 +1,366 @@
+# 将最新 Release 产物同步到 Cloudflare R2
+#
+# 触发时机：Release 被 publish（即 release.yml 中 publish-release job 完成后）
+#
+# 所需 GitHub Secrets：
+#   R2_ACCESS_KEY_ID      — Cloudflare R2 API Token 的 Access Key ID
+#   R2_SECRET_ACCESS_KEY  — Cloudflare R2 API Token 的 Secret Access Key
+#
+# 所需 GitHub Variables（Settings → Variables → Actions）：
+#   R2_ACCOUNT_ID  — Cloudflare 账号 ID（R2 endpoint 前缀）
+#   R2_BUCKET      — R2 桶名
+#   BASE_URL       — 下载页公开域名，如 https://drt.tsagent.cc
+#
+# 同步策略：清空桶内旧文件，写入本次 Release 的全部产物（只保留 latest）
+
+name: Sync Release to R2
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to sync (留空则使用最新 Release)'
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+
+    steps:
+      # ── 1. 下载本次 Release 的全部产物 ──────────────────────────────
+      - name: Resolve release tag
+        id: tag
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # workflow_dispatch 时优先用输入值，否则取最新 Release tag
+          INPUT_TAG="${{ github.event.inputs.tag }}"
+          if [ -n "$INPUT_TAG" ]; then
+            echo "tag=$INPUT_TAG" >> "$GITHUB_OUTPUT"
+          elif [ -n "${{ github.event.release.tag_name }}" ]; then
+            echo "tag=${{ github.event.release.tag_name }}" >> "$GITHUB_OUTPUT"
+          else
+            LATEST=$(gh release view --repo "${{ github.repository }}" --json tagName -q .tagName)
+            echo "tag=$LATEST" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Download release assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p release-assets
+          gh release download "${{ steps.tag.outputs.tag }}" \
+            --repo "${{ github.repository }}" \
+            --dir release-assets/
+          echo "=== Downloaded files (tag: ${{ steps.tag.outputs.tag }}) ==="
+          ls -lh release-assets/
+
+      # ── 2. 生成下载页 index.html ─────────────────────────────────────
+      - name: Generate index.html
+        env:
+          TAG:      ${{ steps.tag.outputs.tag }}
+          BASE_URL: ${{ vars.BASE_URL }}
+          REPO:     ${{ github.repository }}
+        run: |
+          python3 - <<'PYEOF'
+          import os, pathlib, datetime
+
+          tag        = os.environ["TAG"]
+          _raw_url   = os.environ["BASE_URL"].rstrip("/")
+          base_url   = _raw_url if _raw_url.startswith("http") else f"https://{_raw_url}"
+          repo       = os.environ["REPO"]
+          assets_dir = pathlib.Path("release-assets")
+          now        = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
+
+          # card index → label, platform key used for ordering
+          PLATFORM_ORDER = ["Windows", "macOS", "Linux", "Linux Agent", "Checksums"]
+
+          def classify(name):
+              n = name.lower()
+              if n.endswith(".exe"):
+                  sub = "MSI Installer" if "msi" in n else "NSIS Installer (Recommended)"
+                  return ("Windows", sub)
+              if n.endswith(".msi"):
+                  return ("Windows", "MSI Installer")
+              if n.endswith(".dmg"):
+                  arch = "Apple Silicon" if "aarch64" in n else "Intel x86_64" if ("x64" in n or "x86" in n) else "Universal"
+                  return ("macOS", f"DMG · {arch}")
+              if n.endswith(".app.tar.gz"):
+                  return ("macOS", "App Archive")
+              if n.endswith("_amd64.deb"):
+                  return ("Linux", "DEB Package · x86_64")
+              if n.endswith("_arm64.deb"):
+                  return ("Linux", "DEB Package · ARM64")
+              if n.endswith(".deb"):
+                  return ("Linux", "DEB Package")
+              if "x86_64" in n and "musl" in n and not n.endswith(".sha256"):
+                  return ("Linux Agent", "Static Binary · x86_64")
+              if "aarch64" in n and "musl" in n and not n.endswith(".sha256"):
+                  return ("Linux Agent", "Static Binary · ARM64")
+              if n.endswith(".sha256"):
+                  return ("Checksums", "SHA-256")
+              return ("Other", "")
+
+          files = sorted(assets_dir.iterdir(), key=lambda p: p.name)
+
+          groups: dict[str, list] = {}
+          for f in files:
+              size_bytes = f.stat().st_size
+              size_mb    = size_bytes / 1024 / 1024
+              size_str   = f"{size_mb:.1f} MB" if size_mb >= 0.1 else f"{size_bytes} B"
+              cat, desc  = classify(f.name)
+              groups.setdefault(cat, []).append((f.name, size_str, desc))
+
+          # card index used as PROD label
+          ICONS = {
+              "Windows":     "WIN",
+              "macOS":       "MAC",
+              "Linux":       "LNX",
+              "Linux Agent": "AGT",
+              "Checksums":   "CHK",
+              "Other":       "PKG",
+          }
+
+          def render_card(idx, cat, items):
+              label = ICONS.get(cat, "PKG")
+              rows  = ""
+              for name, size, desc in items:
+                  rows += f"""
+              <a class="file-row" href="{base_url}/{name}" download>
+                <div class="file-info">
+                  <span class="file-name">{name}</span>
+                  <span class="file-desc">{desc}</span>
+                </div>
+                <span class="file-size">{size}</span>
+                <span class="dl-btn">↓ Download</span>
+              </a>"""
+              return f"""
+          <div class="card">
+            <div class="card-header">
+              <span class="card-label">PLATFORM_{idx:03d}</span>
+              <span class="card-badge">LATEST</span>
+            </div>
+            <h2 class="card-title">{cat}</h2>
+            <p class="card-sub">{label} · {len(items)} file{"s" if len(items)!=1 else ""}</p>
+            <div class="file-list">{rows}
+            </div>
+          </div>"""
+
+          ordered = [(k, groups[k]) for k in PLATFORM_ORDER if k in groups]
+          ordered += [(k, groups[k]) for k in groups if k not in PLATFORM_ORDER]
+
+          cards = "\n".join(render_card(i+1, cat, items) for i,(cat,items) in enumerate(ordered))
+
+          html = f"""<!DOCTYPE html>
+          <html lang="en">
+          <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1">
+            <title>Easy Dataset — Download {tag}</title>
+            <style>
+              *, *::before, *::after {{ box-sizing: border-box; margin: 0; padding: 0; }}
+              :root {{
+                --bg:      #0a0a0a;
+                --surface: #111111;
+                --border:  #222222;
+                --orange:  #ff6b00;
+                --orange2: #ff8c00;
+                --text:    #e8e8e8;
+                --muted:   #666666;
+                --mono:    "SF Mono", "Fira Code", "Consolas", monospace;
+              }}
+              body {{
+                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+                background: var(--bg); color: var(--text);
+                min-height: 100vh;
+              }}
+              /* ── nav ── */
+              nav {{
+                display: flex; align-items: center; justify-content: space-between;
+                padding: 1.2rem 2.5rem;
+                border-bottom: 1px solid var(--border);
+              }}
+              .logo {{
+                font-family: var(--mono); font-size: .8rem; letter-spacing: .15em;
+                text-transform: uppercase; color: var(--orange); font-weight: 700;
+              }}
+              .nav-tag {{
+                font-family: var(--mono); font-size: .75rem; color: var(--muted);
+                border: 1px solid var(--border); padding: .2rem .6rem; border-radius: 3px;
+              }}
+              /* ── hero ── */
+              .hero {{
+                padding: 5rem 2.5rem 3.5rem;
+                max-width: 900px; margin: 0 auto;
+              }}
+              .hero-eyebrow {{
+                font-family: var(--mono); font-size: .7rem; letter-spacing: .2em;
+                color: var(--orange); text-transform: uppercase; margin-bottom: 1rem;
+              }}
+              .hero h1 {{
+                font-size: clamp(2.2rem, 5vw, 3.5rem);
+                font-weight: 700; line-height: 1.1; margin-bottom: 1rem;
+              }}
+              .hero h1 em {{ font-style: normal; color: var(--orange); }}
+              .hero p {{
+                color: var(--muted); max-width: 520px; line-height: 1.7;
+                font-size: .95rem; margin-bottom: 2rem;
+              }}
+              .hero-links {{ display: flex; gap: 1rem; flex-wrap: wrap; }}
+              .btn-primary {{
+                display: inline-block; background: var(--orange); color: #000;
+                font-weight: 700; padding: .65rem 1.5rem; font-size: .875rem;
+                text-decoration: none; letter-spacing: .02em;
+                transition: background .15s;
+              }}
+              .btn-primary:hover {{ background: var(--orange2); }}
+              .btn-ghost {{
+                display: inline-block; color: var(--muted);
+                border: 1px solid var(--border); padding: .65rem 1.5rem;
+                font-size: .875rem; text-decoration: none; letter-spacing: .02em;
+                transition: border-color .15s, color .15s;
+              }}
+              .btn-ghost:hover {{ border-color: var(--orange); color: var(--text); }}
+              /* ── grid ── */
+              .section {{
+                max-width: 1100px; margin: 0 auto; padding: 0 2.5rem 5rem;
+              }}
+              .section-label {{
+                font-family: var(--mono); font-size: .7rem; letter-spacing: .2em;
+                color: var(--muted); text-transform: uppercase;
+                border-top: 1px solid var(--border); padding-top: 2rem;
+                margin-bottom: 2rem;
+              }}
+              .grid {{
+                display: grid; gap: 1px;
+                grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+                border: 1px solid var(--border);
+              }}
+              /* ── card ── */
+              .card {{
+                background: var(--surface); padding: 1.75rem 1.5rem;
+                border: 1px solid var(--border);
+                transition: border-color .15s;
+                display: flex; flex-direction: column; gap: .75rem;
+              }}
+              .card:hover {{ border-color: var(--orange); }}
+              .card-header {{
+                display: flex; justify-content: space-between; align-items: center;
+              }}
+              .card-label {{
+                font-family: var(--mono); font-size: .65rem; letter-spacing: .15em;
+                color: var(--muted); text-transform: uppercase;
+              }}
+              .card-badge {{
+                font-family: var(--mono); font-size: .6rem; letter-spacing: .1em;
+                color: var(--orange); border: 1px solid var(--orange);
+                padding: .1rem .4rem;
+              }}
+              .card-title {{
+                font-size: 1.3rem; font-weight: 700; letter-spacing: -.01em;
+              }}
+              .card-sub {{
+                font-family: var(--mono); font-size: .7rem; color: var(--orange);
+                letter-spacing: .08em; text-transform: uppercase;
+              }}
+              /* ── file rows ── */
+              .file-list {{ display: flex; flex-direction: column; gap: .3rem; margin-top: .5rem; }}
+              .file-row {{
+                display: flex; align-items: center; gap: .75rem;
+                text-decoration: none; color: var(--text);
+                padding: .6rem .5rem;
+                border: 1px solid transparent;
+                transition: border-color .15s, background .15s;
+              }}
+              .file-row:hover {{
+                border-color: var(--border); background: #161616;
+              }}
+              .file-info {{ flex: 1; min-width: 0; }}
+              .file-name {{
+                display: block; font-family: var(--mono); font-size: .72rem;
+                color: var(--text); word-break: break-all; line-height: 1.4;
+              }}
+              .file-desc {{
+                display: block; font-size: .7rem; color: var(--muted); margin-top: .2rem;
+              }}
+              .file-size {{
+                font-family: var(--mono); font-size: .65rem; color: var(--muted);
+                white-space: nowrap;
+              }}
+              .dl-btn {{
+                background: transparent; color: var(--orange);
+                border: 1px solid var(--orange);
+                padding: .2rem .55rem; font-size: .7rem;
+                font-family: var(--mono); white-space: nowrap;
+                transition: background .15s, color .15s;
+              }}
+              .file-row:hover .dl-btn {{
+                background: var(--orange); color: #000;
+              }}
+              /* ── footer ── */
+              footer {{
+                border-top: 1px solid var(--border);
+                padding: 1.5rem 2.5rem;
+                display: flex; justify-content: space-between; align-items: center;
+                flex-wrap: wrap; gap: .5rem;
+              }}
+              footer span {{ font-family: var(--mono); font-size: .7rem; color: var(--muted); }}
+              footer a {{ color: var(--orange); text-decoration: none; }}
+              footer a:hover {{ text-decoration: underline; }}
+            </style>
+          </head>
+          <body>
+            <nav>
+              <span class="logo">Easy Dataset &nbsp;·&nbsp; Downloads</span>
+              <span class="nav-tag">{tag}</span>
+            </nav>
+
+            <div class="hero">
+              <p class="hero-eyebrow"> 深度学习数据集管理桌面工具</p>
+              <h1>Download <em>Easy Dataset</em></h1>
+              <p>桌面端深度学习数据集管理工具，支持数据集的可视化、质量评估、格式转化、标签修改等常用功能。</p>
+              <div class="hero-links">
+                <a class="btn-primary" href="https://github.com/{repo}/releases/tag/{tag}" target="_blank">Release Notes</a>
+                <a class="btn-ghost"   href="https://github.com/{repo}" target="_blank">View on GitHub →</a>
+              </div>
+            </div>
+
+            <div class="section">
+              <p class="section-label">Available Downloads · {tag} · {now}</p>
+              <div class="grid">
+                {cards}
+              </div>
+            </div>
+
+            <footer>
+              <span>© Easy Dataset · <a href="https://github.com/{repo}" target="_blank">github.com/{repo}</a></span>
+              <span>Updated {now}</span>
+            </footer>
+          </body>
+          </html>"""
+
+          pathlib.Path("release-assets/index.html").write_text(html, encoding="utf-8")
+          print("index.html generated.")
+          PYEOF
+
+      # ── 3. 同步到 Cloudflare R2（S3 兼容接口）──────────────────────
+      #   --delete：删除 R2 中不属于本次 Release 的旧文件，确保桶内始终只有最新版
+      - name: Sync to Cloudflare R2
+        env:
+          AWS_ACCESS_KEY_ID:     ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION:    auto
+        run: |
+          aws s3 sync release-assets/ s3://${{ vars.R2_BUCKET }}/ \
+            --endpoint-url https://${{ vars.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com \
+            --delete \
+            --no-progress
+          echo "=== Sync complete. Current bucket contents ==="
+          aws s3 ls s3://${{ vars.R2_BUCKET }}/ \
+            --endpoint-url https://${{ vars.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com
