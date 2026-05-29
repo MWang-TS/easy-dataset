@@ -23,9 +23,12 @@ export default function SetupWizard() {
   const [manualExe, setManualExe] = useState("");
   const [scanError, setScanError] = useState<string | null>(null);
   const [appDir, setAppDir] = useState("");
+  const [appDirError, setAppDirError] = useState<string | null>(null);
 
   useEffect(() => {
-    getAppDir().then(setAppDir).catch(console.error);
+    getAppDir()
+      .then((dir) => { setAppDir(dir); setAppDirError(null); })
+      .catch((e) => { setAppDirError(String(e)); console.error(e); });
   }, []);
 
   const handleScan = async () => {
@@ -47,6 +50,10 @@ export default function SetupWizard() {
   };
 
   const handleConfirm = () => {
+    if (appDirError || !appDir) {
+      alert(`后端目录初始化失败，无法启动：\n${appDirError ?? "appDir 为空"}`);
+      return;
+    }
     let config: AppConfig;
     if (confirmMode === "conda" && selected) {
       const pythonExe = selected.path.includes("\\")

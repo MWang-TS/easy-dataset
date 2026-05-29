@@ -1,6 +1,6 @@
 [package]
 name = "easy-dataset"
-version = "0.0.2"
+version = "0.0.3"
 description = "Easy Dataset - YOLO Dataset Management Desktop App"
 authors = ["EasyOLO"]
 edition = "2021"

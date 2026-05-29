@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { getVersion } from "@tauri-apps/api/app";
 import { confirm } from "@tauri-apps/plugin-dialog";
 import { cn } from "@/lib/utils";
 import { DEFAULT_BACKEND_PORT, useAppStore } from "@/lib/store";
@@ -100,6 +101,8 @@ export default function MainPage() {
   // ── 系统设置弹窗 ──
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsTab, setSettingsTab] = useState<'env' | 'about'>('env');
+  const [appVersion, setAppVersion] = useState("0.0.1");
+  useEffect(() => { getVersion().then(setAppVersion).catch(() => {}); }, []);
   const [envList, setEnvList] = useState<CondaEnv[]>([]);
   const [envScanning, setEnvScanning] = useState(false);
   const [theme, setTheme] = useState<'dark' | 'light'>('dark');
@@ -468,7 +471,7 @@ export default function MainPage() {
           </>
         )}
         <div className="flex-1" />
-        <span style={{ color: "hsl(var(--border))" }}>v0.0.1</span>
+        <span style={{ color: "hsl(var(--border))" }}>v{appVersion}</span>
       </div>
       {/* ── Buy Me a Coffee 弹窗 ── */}
       {coffeeOpen && (
@@ -685,7 +688,7 @@ export default function MainPage() {
                     <div className="text-sm mt-1" style={{ color: 'hsl(var(--muted-foreground))' }}>{t('settings.aboutDesc')}</div>
                   </div>
                   <div className="text-xs px-4 py-2 rounded-full font-medium" style={{ background: 'hsl(var(--accent))', color: 'hsl(var(--muted-foreground))', border: '1px solid hsl(var(--border))' }}>
-                    {t('settings.version', { version: 'v0.0.1' })}
+                    {t('settings.version', { version: `v${appVersion}` })}
                   </div>
                   <div className="text-xs text-center leading-6" style={{ color: 'hsl(var(--muted-foreground))' }}>
                     {t('settings.aboutFeatures')}
