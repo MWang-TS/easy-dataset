@@ -10,6 +10,7 @@
 				"approve": true,
 				"matchCommandLine": true
 			}
-		}
+		},
+		"deepseek-copilot.experimental.stabilizeToolList": true
 	}
 }

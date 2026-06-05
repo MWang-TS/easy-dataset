@@ -206,6 +206,20 @@ export const api = {
   // 视频抽帧
   videoInfo: (params: { video_path: string }) =>
     apiPost("/api/video/info", params),
-  videoExtractFrames: (params: { video_path: string; output_dir: string; interval_frames?: number; format?: string; quality?: number; prefix?: string }) =>
-    apiPost("/api/video/extract-frames", params),
+  videoExtractFrames: (params: { video_path: string; output_dir: string; interval_frames?: number; format?: string; quality?: number; prefix?: string; num_workers?: number }) =>
+    apiPost<{ success: boolean; task_id?: string; message?: string }>("/api/video/extract-frames", params),
+  videoExtractStatus: (params: { task_id: string }) =>
+    apiPost<{ success: boolean; state?: string; saved?: number; total_frames?: number; result?: Record<string, unknown> }>("/api/video/extract-status", params),
+  videoStopExtract: (params: { task_id: string }) =>
+    apiPost("/api/video/stop-extract", params),
+
+  // AI 视频智能抽帧
+  videoAiCheck: () =>
+    apiPost<{ available: boolean; version?: string; message?: string; default_model?: string }>("/api/video/ai-check", {}),
+  videoAiExtractFrames: (params: { video_path: string; output_dir: string; target_classes: string; model_path?: string; conf_threshold?: number; interval_frames?: number; format?: string; quality?: number; prefix?: string; max_parallel?: number; batch_size?: number; segment_minutes?: number }) =>
+    apiPost<{ success: boolean; task_id?: string; message?: string }>("/api/video/ai-extract-frames", params),
+  videoAiExtractStatus: (params: { task_id: string }) =>
+    apiPost<{ success: boolean; state?: string; processed?: number; saved?: number; total_frames?: number; result?: Record<string, unknown> }>("/api/video/ai-extract-status", params),
+  videoAiStopExtract: (params: { task_id: string }) =>
+    apiPost("/api/video/ai-stop-extract", params),
 };

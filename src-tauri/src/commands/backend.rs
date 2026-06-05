@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::process::Child;
 use std::sync::Mutex;
-use tauri::{Manager, State};
+use tauri::{State};
 
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
@@ -179,6 +179,27 @@ pub async fn start_backend(
         let log_clone = log_file.try_clone().map_err(|e| e.to_string())?;
 
         let mut command = std::process::Command::new(&python_exe);
+
+        // 把 conda env 的 Library\bin / Scripts / env root 加入子进程 PATH
+        // 这样 shutil.which("ffmpeg") 等系统工具才能被找到
+        let env_root = std::path::Path::new(&python_exe)
+            .parent()
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_default();
+        let extra_paths: Vec<String> = if cfg!(target_os = "windows") {
+            vec![
+                format!("{}\\Library\\bin", env_root),
+                format!("{}\\Library\\usr\\bin", env_root),
+                format!("{}\\Scripts", env_root),
+                env_root.clone(),
+            ]
+        } else {
+            vec![format!("{}/bin", env_root)]
+        };
+        let current_path = std::env::var("PATH").unwrap_or_default();
+        let sep = if cfg!(target_os = "windows") { ";" } else { ":" };
+        let new_path = format!("{}{}{}", extra_paths.join(sep), sep, current_path);
+
         command
             .args(["-u", "app.py"])
             .env("PORT", port.to_string())
@@ -186,6 +207,8 @@ pub async fn start_backend(
             .env("FLASK_DEBUG", "0")
             .env("EASY_DATASET_EMBEDDED", "1")
             .env("PYTHONUNBUFFERED", "1")
+            .env("PATH", new_path)
+            .env("PARENT_PID", std::process::id().to_string())
             .current_dir(&app_dir)
             .stdout(log_file)
             .stderr(log_clone);

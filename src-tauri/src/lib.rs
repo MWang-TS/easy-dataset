@@ -2,6 +2,7 @@ mod commands;
 
 use commands::backend::{self, BackendState};
 use std::sync::Mutex;
+use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -24,6 +25,16 @@ pub fn run() {
             backend::write_text_file,
             backend::fetch_text,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app_handle, event| {
+            if let tauri::RunEvent::Exit = event {
+                let state = app_handle.state::<BackendState>();
+                let mut guard = state.0.lock().unwrap_or_else(|e| e.into_inner());
+                if let Some(mut child) = guard.take() {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                }
+            }
+        });
 }

@@ -22,6 +22,7 @@ from services.export_service import ExportService
 from services.merge_service import MergeService
 from services.augment_service import AugmentService
 from services.video_service import VideoService
+from services.ai_video_service import AIVideoService, DEFAULT_MODEL_PATH
 
 
 # ────────────────── 可选鉴权 ──────────────────
@@ -367,16 +368,85 @@ def video_info():
 
 @main_bp.route('/api/video/extract-frames', methods=['POST'])
 def video_extract_frames():
-    """按帧间隔抽帧并保存到输出目录"""
+    """启动后台抽帧任务，立即返回 task_id"""
     data = request.get_json(force=True)
-    result = VideoService.extract_frames(
+    result = VideoService.start_extract_frames(
         video_path=data.get('video_path', ''),
         output_dir=data.get('output_dir', ''),
         interval_frames=data.get('interval_frames', 30),
         fmt=data.get('format', 'jpg'),
         quality=data.get('quality', 95),
         prefix=data.get('prefix', 'frame'),
+        num_workers=int(data.get('num_workers', 1)),
     )
+    return jsonify(result)
+
+
+@main_bp.route('/api/video/extract-status', methods=['POST'])
+def video_extract_status():
+    """查询抽帧任务状态"""
+    data = request.get_json(force=True)
+    result = VideoService.get_status(task_id=data.get('task_id', ''))
+    return jsonify(result)
+
+
+@main_bp.route('/api/video/stop-extract', methods=['POST'])
+def video_stop_extract():
+    """中止指定抽帧任务"""
+    data = request.get_json(force=True)
+    result = VideoService.stop_extraction(task_id=data.get('task_id', ''))
+    return jsonify(result)
+
+
+# ────────────────── AI 视频智能抽帧 ──────────────────
+
+@main_bp.route('/api/video/ai-check', methods=['POST', 'GET'])
+def video_ai_check():
+    """检查当前环境是否支持 AI 抽帧"""
+    result = AIVideoService.check_available()
+    result['default_model'] = DEFAULT_MODEL_PATH
+    return jsonify(result)
+
+
+@main_bp.route('/api/video/ai-extract-frames', methods=['POST'])
+def video_ai_extract_frames():
+    """启动 AI 智能抽帧后台任务，立即返回 task_id"""
+    data = request.get_json(force=True)
+    target_raw = data.get('target_classes', '')
+    if isinstance(target_raw, str):
+        target_classes = [c.strip() for c in target_raw.replace('，', ',').split(',') if c.strip()]
+    else:
+        target_classes = list(target_raw)
+    result = AIVideoService.start_extract_frames(
+        video_path=data.get('video_path', ''),
+        output_dir=data.get('output_dir', ''),
+        model_path=data.get('model_path', ''),
+        target_classes=target_classes,
+        conf_threshold=float(data.get('conf_threshold', 0.25)),
+        interval_frames=int(data.get('interval_frames', 1)),
+        fmt=data.get('format', 'jpg'),
+        quality=int(data.get('quality', 95)),
+        prefix=data.get('prefix', 'ai_frame'),
+        max_parallel=int(data.get('max_parallel', 2)),
+        batch_size=int(data.get('batch_size', 8)),
+        segment_minutes=int(data.get('segment_minutes', 0)),
+    )
+    return jsonify(result)
+
+
+@main_bp.route('/api/video/ai-extract-status', methods=['POST'])
+def video_ai_extract_status():
+    """查询 AI 抽帧任务进度"""
+    data = request.get_json(force=True)
+    result = AIVideoService.get_status(task_id=data.get('task_id', ''))
+    return jsonify(result)
+
+
+@main_bp.route('/api/video/ai-stop-extract', methods=['POST'])
+def video_ai_stop_extract():
+    """中止 AI 抽帧任务"""
+    data = request.get_json(force=True)
+    result = AIVideoService.stop_extraction(task_id=data.get('task_id', ''))
     return jsonify(result)
 
 
