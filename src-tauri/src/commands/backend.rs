@@ -372,7 +372,17 @@ pub fn get_app_dir(app: tauri::AppHandle) -> Result<String, String> {
     }
     #[cfg(not(debug_assertions))]
     {
-        let src_dir = find_backend_src_dir()?;
+        // 优先用 Tauri resource_dir（跨平台正确路径）
+        let src_dir = app.path().resource_dir()
+            .map_err(|e| format!("获取资源目录失败: {}", e))?;
+
+        // 验证 app.py 确实在 resource_dir（或其子目录）
+        let src_dir = if src_dir.join("app.py").exists() && src_dir.join("config.py").exists() {
+            src_dir
+        } else {
+            // fallback: 旧版 BFS 搜索（兼容非标准打包结构）
+            find_backend_src_dir()?
+        };
 
         let runtime_dir = app.path().app_local_data_dir()
             .map_err(|e| format!("找不到本地数据目录: {}", e))?
