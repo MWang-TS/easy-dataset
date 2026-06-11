@@ -297,10 +297,35 @@ fn sync_backend_runtime_dir(
     resource_dir: &std::path::Path,
     runtime_dir: &std::path::Path,
 ) -> Result<(), String> {
+    const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
+    let version_file = runtime_dir.join(".runtime_version");
+
+    // 检查版本是否匹配；不匹配（或首次安装）则清空旧 runtime 目录，
+    // 确保旧 __pycache__ 字节码不会遮蔽新版 .py 文件
+    let needs_full_sync = if version_file.exists() {
+        match std::fs::read_to_string(&version_file) {
+            Ok(v) => v.trim() != APP_VERSION,
+            Err(_) => true,
+        }
+    } else {
+        true
+    };
+
+    if needs_full_sync && runtime_dir.exists() {
+        std::fs::remove_dir_all(runtime_dir)
+            .map_err(|e| format!("清理旧运行时目录失败: {}", e))?;
+    }
+
     std::fs::create_dir_all(runtime_dir)
         .map_err(|e| format!("创建运行时目录失败: {}", e))?;
     copy_dir_recursive(resource_dir, runtime_dir)
-        .map_err(|e| format!("同步后端文件失败: {}", e))
+        .map_err(|e| format!("同步后端文件失败: {}", e))?;
+
+    // 写入当前版本标记
+    std::fs::write(&version_file, APP_VERSION)
+        .map_err(|e| format!("写入版本标记失败: {}", e))?;
+
+    Ok(())
 }
 
 #[cfg(not(debug_assertions))]
