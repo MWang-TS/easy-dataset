@@ -370,27 +370,55 @@ class DatasetService:
             if not os.path.isfile(image_path):
                 return {'success': False, 'message': f'图片不存在: {image_path}'}
 
-            img = Image.open(image_path).convert('RGB')
+            img = Image.open(image_path).convert('RGBA')
             W, H = img.size
-            draw = ImageDraw.Draw(img)
 
             if label_path and os.path.isfile(label_path):
+                # 分离绘制层，以便 mask 半透明叠加
+                overlay = Image.new('RGBA', (W, H), (0, 0, 0, 0))
+                overlay_draw = ImageDraw.Draw(overlay)
+                draw = ImageDraw.Draw(img)
+
                 with open(label_path, 'r') as f:
                     for line in f:
                         parts = line.strip().split()
                         if len(parts) < 5:
                             continue
                         cid = int(parts[0])
-                        cx, cy, w, h = float(parts[1]), float(parts[2]), float(parts[3]), float(parts[4])
-                        x1 = int((cx - w / 2) * W)
-                        y1 = int((cy - h / 2) * H)
-                        x2 = int((cx + w / 2) * W)
-                        y2 = int((cy + h / 2) * H)
                         color = _COLORS[cid % len(_COLORS)]
-                        draw.rectangle([x1, y1, x2, y2], outline=color, width=2)
                         name = (class_names or [])[cid] if class_names and cid < len(class_names) else str(cid)
+
+                        # YOLO seg 格式：class_id x1 y1 x2 y2 ... (至少 7 个值，点数为偶数)
+                        coords = [float(v) for v in parts[1:]]
+                        if len(coords) >= 6 and len(coords) % 2 == 0:
+                            # 分割格式：绘制多边形 mask
+                            poly = [(int(coords[i] * W), int(coords[i + 1] * H))
+                                    for i in range(0, len(coords), 2)]
+                            # 半透明填充
+                            overlay_draw.polygon(poly, fill=(*color, 80))
+                            # 多边形轮廓
+                            overlay_draw.line(poly + [poly[0]], fill=(*color, 230), width=2)
+                            # 从多边形计算包围盒用于标签
+                            xs = [p[0] for p in poly]
+                            ys = [p[1] for p in poly]
+                            x1, y1 = min(xs), min(ys)
+                        else:
+                            # 检测格式：cx cy w h
+                            cx, cy, w, h = coords[0], coords[1], coords[2], coords[3]
+                            x1 = int((cx - w / 2) * W)
+                            y1 = int((cy - h / 2) * H)
+                            x2 = int((cx + w / 2) * W)
+                            y2 = int((cy + h / 2) * H)
+                            draw.rectangle([x1, y1, x2, y2], outline=color, width=2)
+
+                        # 类别标签
                         draw.rectangle([x1, y1 - 16, x1 + len(name) * 7 + 4, y1], fill=color)
                         draw.text((x1 + 2, y1 - 15), name, fill=(255, 255, 255))
+
+                # 将 overlay（mask层）合并到原图
+                img = Image.alpha_composite(img, overlay)
+
+            img = img.convert('RGB')
 
             # 限制预览尺寸
             max_dim = 1280
