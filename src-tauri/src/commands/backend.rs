@@ -2,6 +2,10 @@ use serde::{Deserialize, Serialize};
 use std::process::Child;
 use std::sync::Mutex;
 use tauri::State;
+// Manager trait 提供 app.path()，仅在 release（非 debug）分支使用；
+// debug 构建走 CARGO_MANIFEST_DIR 分支，不引入 Manager 以免 unused 警告。
+#[cfg(not(debug_assertions))]
+use tauri::Manager;
 
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
