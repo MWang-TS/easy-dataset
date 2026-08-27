@@ -7,6 +7,8 @@ import uuid
 import threading
 import cv2
 
+from services.image_io import imwrite_unicode
+
 # 任务状态字典，key=task_id
 # state: "running" | "stopped" | "done" | "error"
 _tasks: dict = {}
@@ -167,7 +169,9 @@ class VideoService:
                         if fi % interval_frames == 0:
                             # 用全局帧号命名，文件天然有序
                             fname = f"{prefix}_{fi:08d}.{ext}"
-                            cv2.imwrite(os.path.join(output_dir, fname), frame, write_params)
+                            ok = imwrite_unicode(os.path.join(output_dir, fname), frame, write_params)
+                            if not ok:
+                                print(f"[video] imwrite failed: {os.path.join(output_dir, fname)}")
                             with count_lock:
                                 saved_count[0] += 1
                                 task["saved"] = saved_count[0]

@@ -16,6 +16,8 @@ import tempfile
 import threading
 import cv2
 
+from services.image_io import imwrite_unicode
+
 _tasks: dict = {}
 _tasks_lock = threading.Lock()
 
@@ -199,7 +201,7 @@ def _infer_segment_simple(
                 for cls_id in r.boxes.cls.tolist():
                     if model.names.get(int(cls_id), "").lower() in target_set:
                         fname = f"{prefix}_{batch_gfis[i]:08d}.{ext}"
-                        cv2.imwrite(os.path.join(output_dir, fname), batch_frames[i], write_params)
+                        imwrite_unicode(os.path.join(output_dir, fname), batch_frames[i], write_params)
                         newly += 1
                         break
         saved_local += newly
@@ -329,7 +331,7 @@ def _infer_segment(
                         break
             if hit:
                 fname = f"{prefix}_{batch_gfis[i]:08d}.{ext}"
-                cv2.imwrite(os.path.join(output_dir, fname), batch_frames[i], write_params)
+                imwrite_unicode(os.path.join(output_dir, fname), batch_frames[i], write_params)
                 newly_saved += 1
         saved_local += newly_saved
         batch_frames.clear()
@@ -718,7 +720,7 @@ class AIVideoService:
                                 break
                     if hit:
                         fname = f"{prefix}_{batch_fis[i]:08d}.{ext}"
-                        cv2.imwrite(os.path.join(output_dir, fname), batch_frames[i], write_params)
+                        imwrite_unicode(os.path.join(output_dir, fname), batch_frames[i], write_params)
                         saved += 1
                         task["saved"] = saved
                 batch_frames.clear()

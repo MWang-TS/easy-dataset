@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::process::Child;
 use std::sync::Mutex;
-use tauri::{Manager, State};
+use tauri::State;
 
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
