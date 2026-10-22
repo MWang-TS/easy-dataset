@@ -87,19 +87,31 @@ jobs:
 
           def classify(name: str):
               n = name.lower()
-              if n.endswith(".msi") or n.endswith(".exe"):
-                  return "windows", "x64"
-              if n.endswith(".dmg") or n.endswith(".app.tar.gz"):
+              if n.endswith(".msi"):
+                  return "windows", "x64", "msi"
+              if n.endswith(".exe"):
+                  return "windows", "x64", "exe"
+              if n.endswith(".dmg"):
                   if "aarch64" in n or "arm64" in n:
-                      return "macos", "arm64"
+                      return "macos", "arm64", "dmg"
                   if "x64" in n or "x86" in n or "intel" in n:
-                      return "macos", "x64"
-                  return "macos", "universal"
-              if n.endswith(".deb") or n.endswith(".appimage") or n.endswith(".rpm"):
-                  if "aarch64" in n or "arm64" in n:
-                      return "linux", "arm64"
-                  return "linux", "x64"
+                      return "macos", "x64", "dmg"
+                  return "macos", "universal", "dmg"
+              if n.endswith(".deb"):
+                  return ("linux", "arm64" if ("aarch64" in n or "arm64" in n) else "x64", "deb")
+              if n.endswith(".rpm"):
+                  return ("linux", "arm64" if ("aarch64" in n or "arm64" in n) else "x64", "rpm")
+              if n.endswith(".appimage"):
+                  return ("linux", "arm64" if ("aarch64" in n or "arm64" in n) else "x64", "appimage")
               return None
+
+          # Tauri 的 .app.tar.gz 是自动更新包，.sig 是签名，都不属于用户手动下载
+          def is_updater(name: str) -> bool:
+              n = name.lower()
+              return n.endswith(".app.tar.gz") or n.endswith(".sig") or n.endswith(".json")
+
+          OS_ORDER = {"windows": 0, "macos": 1, "linux": 2}
+          KIND_ORDER = {"exe": 0, "msi": 1, "dmg": 2, "deb": 3, "rpm": 4, "appimage": 5}
 
           def sha256(path: pathlib.Path) -> str:
               h = hashlib.sha256()
@@ -112,6 +124,9 @@ jobs:
           for p in sorted(pathlib.Path("assets").iterdir()):
               if not p.is_file() or p.name.startswith("."):
                   continue
+              if is_updater(p.name):
+                  print(f"  skip (updater artifact): {p.name}")
+                  continue
               oa = classify(p.name)
               if not oa:
                   print(f"  skip (not an installer): {p.name}")
@@ -119,11 +134,14 @@ jobs:
               files.append({
                   "os": oa[0],
                   "arch": oa[1],
+                  "kind": oa[2],
                   "name": p.name,
                   "url": f"{domain}/{slug}/{version}/{p.name}",
                   "size": p.stat().st_size,
                   "sha256": sha256(p),
               })
+
+          files.sort(key=lambda f: (OS_ORDER[f["os"]], KIND_ORDER[f["kind"]], f["arch"]))
 
           if not files:
               raise SystemExit("no installer artifacts found in release assets")
