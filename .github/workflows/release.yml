@@ -70,6 +70,18 @@ jobs:
           tagName: ${{ github.ref_name }}
           releaseName: 'Easy Dataset ${{ github.ref_name }}'
           releaseBody: |
-            See [CHANGELOG.md](https://github.com/${{ github.repository }}/blob/main/CHANGELOG.md) for details.
+            ### Easy Dataset ${{ github.ref_name }}
+
+            安装包见下方 **Assets**：
+
+            | 平台 | 文件 |
+            |---|---|
+            | Windows x64 | `.exe`（NSIS，推荐）/ `.msi` |
+            | macOS Apple Silicon | `.dmg` |
+            | Linux x64 | `.AppImage` / `.deb` / `.rpm` |
+
+            提交记录：https://github.com/${{ github.repository }}/commits/${{ github.ref_name }}
+
+            > 打赏完全自愿，不影响任何功能使用。
           releaseDraft: false
           prerelease: false
