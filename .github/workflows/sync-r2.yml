@@ -13,12 +13,21 @@
 # 所需 GitHub Variables：
 #   R2_ACCOUNT_ID  — Cloudflare 账号 ID
 #   R2_BUCKET      — 桶名（tsagent-downloads）
+#
+# 触发时机：
+#   `release: published` —— 人工/其它 token 发布 Release 时触发。
+#   `workflow_run`       —— **本仓库 release.yml 用 GITHUB_TOKEN 创建 Release，
+#                           GitHub 为防递归不会触发 on: release 的其它工作流**，
+#                           所以必须同时监听 Release 工作流完成事件，否则同步永不执行。
 
 name: Sync Release to R2
 
 on:
   release:
     types: [published]
+  workflow_run:
+    workflows: ["Release"]
+    types: [completed]
   workflow_dispatch:
     inputs:
       tag:
@@ -39,6 +48,14 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Skip if upstream build failed
+        if: github.event_name == 'workflow_run'
+        run: |
+          if [ "${{ github.event.workflow_run.conclusion }}" != "success" ]; then
+            echo "Upstream workflow did not succeed (conclusion: ${{ github.event.workflow_run.conclusion }})."
+            exit 1
+          fi
+
       - name: Resolve release tag
         id: tag
         env:

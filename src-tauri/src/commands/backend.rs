@@ -423,7 +423,10 @@ pub fn get_app_dir(app: tauri::AppHandle) -> Result<String, String> {
 
 // ─── 通用 HTTP GET（版本检查等）──────────────────────────────
 
-/// 抓取指定 URL 的响应文本，用于前端版本检查（绕过 CORS 限制）
+/// 抓取指定 URL 的响应文本，用于前端版本检查（绕过 CORS 限制）。
+///
+/// 非 2xx 一律返回 Err：否则 404/500 的错误页会被当成正常内容，
+/// 前端只能报“解析失败”，看不出真正原因。
 #[tauri::command]
 pub async fn fetch_text(url: String) -> Result<String, String> {
     let client = reqwest::Client::builder()
@@ -432,5 +435,48 @@ pub async fn fetch_text(url: String) -> Result<String, String> {
         .build()
         .map_err(|e| e.to_string())?;
     let resp = client.get(&url).send().await.map_err(|e| e.to_string())?;
-    resp.text().await.map_err(|e| e.to_string())
+    let status = resp.status();
+    let body = resp.text().await.map_err(|e| e.to_string())?;
+    if !status.is_success() {
+        let snippet: String = body.chars().take(200).collect();
+        return Err(format!("HTTP {} {}", status.as_u16(), snippet.trim()));
+    }
+    Ok(body)
 }
+
+// ─── 平台信息（版本检查时挑选对应安装包）────────────────────
+
+#[derive(Serialize)]
+pub struct PlatformInfo {
+    /// windows | macos | linux，与发布清单 `files[].os` 同名
+    pub os: String,
+    /// x64 | arm64 | x86，与发布清单 `files[].arch` 同名
+    pub arch: String,
+}
+
+/// 返回编译目标的操作系统与架构。
+///
+/// 前端据此从 `latest.json` 里挑选本平台的安装包直链；
+/// 不要用 UA 猜架构（macOS 的 Rosetta / ARM 在 WebView 里无法区分）。
+#[tauri::command]
+pub fn platform_info() -> PlatformInfo {
+    let os = if cfg!(target_os = "windows") {
+        "windows"
+    } else if cfg!(target_os = "macos") {
+        "macos"
+    } else if cfg!(target_os = "linux") {
+        "linux"
+    } else {
+        "unknown"
+    };
+    let arch = match std::env::consts::ARCH {
+        "x86_64" => "x64",
+        "aarch64" => "arm64",
+        other => other,
+    };
+    PlatformInfo {
+        os: os.to_string(),
+        arch: arch.to_string(),
+    }
+}
+

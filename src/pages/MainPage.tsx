@@ -3,19 +3,23 @@ import {
   BarChart2, Eye, RefreshCw, Layers, FolderCog, Scissors,
   Settings, Play, Square, Cpu, CircleHelp,
   GitMerge, Film, Minus, Maximize2, X as XIcon,
-  Coffee, Sun, Moon, Globe, Check, ArrowDownToLine, CheckCircle2,
+  Coffee, Sun, Moon, Globe, Check, ArrowDownToLine,
+  Github, Mail, ExternalLink, Copyright,
 } from "lucide-react";
-import { QRCodeSVG } from "qrcode.react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { getVersion } from "@tauri-apps/api/app";
 import { confirm } from "@tauri-apps/plugin-dialog";
 import { cn } from "@/lib/utils";
 import { DEFAULT_BACKEND_PORT, useAppStore } from "@/lib/store";
 import { useTranslation } from "react-i18next";
 import { setLocale, LOCALE_LABELS, type Locale } from "@/i18n/index";
-import { startBackend, stopBackend, checkBackendAlive, listCondaEnvs, getAppDir, checkForUpdates, type CondaEnv, type UpdateInfo } from "@/lib/tauri-bridge";
-import { openUrl } from "@tauri-apps/plugin-opener";
+import { startBackend, stopBackend, checkBackendAlive, listCondaEnvs, getAppDir, type CondaEnv } from "@/lib/tauri-bridge";
+import { checkForUpdates, type UpdateInfo } from "@/lib/update";
+import { APP_VERSION } from "@/lib/version";
+import { CONTACT_EMAIL, PRODUCT_HOME_URL, REPO_URL, STUDIO_URL } from "@/lib/links";
+import { openExternal } from "@/lib/open-external";
 import { SidebarPortalCtx } from "@/lib/sidebar-context";
+import TipDialog from "@/components/TipDialog";
+import UpdateDialog from "@/components/UpdateDialog";
 
 // ── 页面组件（懒加载占位，正式实现在各自文件中）──
 import DatasetQuality from "./DatasetQuality";
@@ -92,7 +96,7 @@ export default function MainPage() {
   const [sidebarEl, setSidebarEl] = useState<HTMLElement | null>(null);
   useEffect(() => { setSidebarEl(sidebarRef.current); }, []);
 
-  // ── Buy Me a Coffee 弹窗 ──
+  // ── 打赏（Buy Me a Coffee）弹窗：走 payment-server /client/* ──
   const [coffeeOpen, setCoffeeOpen] = useState(false);
 
   // ── 语言切换下拉 ──
@@ -108,12 +112,11 @@ export default function MainPage() {
   // ── 系统设置弹窗 ──
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsTab, setSettingsTab] = useState<'env' | 'about'>('env');
-  const [appVersion, setAppVersion] = useState("0.0.1");
-  useEffect(() => { getVersion().then(setAppVersion).catch(() => {}); }, []);
+  // 版本号唯一真相源：package.json（构建期注入），不再异步向 Tauri 讨要
+  const appVersion = APP_VERSION;
 
-  // 启动 5 秒后静默检测新版本
+  // 启动 5 秒后静默检测新版本（失败不提示，不阻断使用）
   useEffect(() => {
-    if (appVersion === "0.0.1") return; // 等版本号加载完再检测
     const timer = setTimeout(async () => {
       try {
         const info = await checkForUpdates(appVersion);
@@ -121,7 +124,6 @@ export default function MainPage() {
       } catch { /* 静默忽略 */ }
     }, 5000);
     return () => clearTimeout(timer);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [appVersion]);
 
   const handleCheckUpdate = useCallback(async () => {
@@ -132,7 +134,7 @@ export default function MainPage() {
       const info = await checkForUpdates(appVersion);
       setUpdateInfo(info);
     } catch (e) {
-      setUpdateError(String(e));
+      setUpdateError(e instanceof Error ? e.message : String(e));
     } finally {
       setChecking(false);
       setUpdateOpen(true);
@@ -301,12 +303,23 @@ export default function MainPage() {
           <Cpu className="w-3 h-3" style={{ color: "white" }} />
         </div>
         <span className="text-xs" style={{ color: "hsl(var(--muted-foreground))" }}>Easy Dataset</span>
+        <span
+          className="text-[10px] px-1.5 py-0.5 rounded font-medium flex-shrink-0"
+          style={{
+            color: 'hsl(var(--muted-foreground))',
+            background: 'hsl(var(--muted))',
+            border: '1px solid hsl(var(--border))',
+          }}
+          title={t('update.currentVersion', { version: `v${appVersion}` })}
+        >
+          v{appVersion}
+        </span>
         {updateInfo?.has_update && (
           <button
             onClick={() => setUpdateOpen(true)}
             className="text-xs px-1.5 py-0.5 rounded font-medium animate-pulse"
             style={{ background: 'rgba(34,197,94,0.15)', color: '#22c55e', border: '1px solid rgba(34,197,94,0.3)' }}
-            title={`v${updateInfo.latest_version} 可用`}
+            title={t('update.newVersion', { version: `v${updateInfo.latest_version}` })}
           >
             ↑ v{updateInfo.latest_version}
           </button>
@@ -360,7 +373,7 @@ export default function MainPage() {
             onClick={() => setCoffeeOpen(true)}
             className="w-8 h-7 flex items-center justify-center rounded"
             style={{ color: 'hsl(var(--muted-foreground))' }}
-            title="Buy me a coffee ☕"
+            title={t('coffee.title')}
           >
             <Coffee className="w-3.5 h-3.5" />
           </button>
@@ -527,183 +540,18 @@ export default function MainPage() {
         <span style={{ color: "hsl(var(--border))" }}>v{appVersion}</span>
       </div>
       {/* ── 检查更新弹窗 ── */}
-      {updateOpen && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center"
-          style={{ background: 'rgba(0,0,0,0.5)' }}
-          onMouseDown={(e) => { if (e.target === e.currentTarget) setUpdateOpen(false); }}
-        >
-          <div
-            className="relative w-[480px] max-w-[90vw] rounded-xl shadow-2xl p-6"
-            style={{ background: 'hsl(var(--card))', border: '1px solid hsl(var(--border))' }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <button
-              onClick={() => setUpdateOpen(false)}
-              className="absolute top-3 right-3 p-1 rounded-md hover:opacity-70 transition-opacity"
-              style={{ color: 'hsl(var(--muted-foreground))' }}
-            >
-              <XIcon className="w-4 h-4" />
-            </button>
+      <UpdateDialog
+        open={updateOpen}
+        info={updateInfo}
+        error={updateError}
+        checking={checking}
+        currentVersion={appVersion}
+        onClose={() => setUpdateOpen(false)}
+        onRetry={handleCheckUpdate}
+      />
 
-            {updateError ? (
-              <>
-                <div className="flex items-center gap-2 mb-3">
-                  <span className="font-semibold text-sm" style={{ color: 'hsl(var(--foreground))' }}>
-                    {t('update.checkFailed')}
-                  </span>
-                </div>
-                <p className="text-xs rounded-md p-3" style={{ background: 'hsl(var(--muted))', color: 'hsl(var(--muted-foreground))' }}>
-                  {updateError}
-                </p>
-                <div className="flex justify-end mt-4">
-                  <button
-                    onClick={() => setUpdateOpen(false)}
-                    className="px-4 py-1.5 rounded-md text-sm transition-opacity hover:opacity-80"
-                    style={{ background: 'hsl(var(--muted))', color: 'hsl(var(--foreground))' }}
-                  >
-                    {t('common.close')}
-                  </button>
-                </div>
-              </>
-            ) : updateInfo?.has_update ? (
-              <>
-                <div className="flex items-center gap-2 mb-1">
-                  <ArrowDownToLine className="w-5 h-5" style={{ color: 'hsl(var(--primary))' }} />
-                  <span className="font-semibold text-base" style={{ color: 'hsl(var(--foreground))' }}>
-                    {t('update.newVersion', { version: `v${updateInfo.latest_version}` })}
-                  </span>
-                </div>
-                <p className="text-xs mb-4" style={{ color: 'hsl(var(--muted-foreground))' }}>
-                  {t('update.currentVersion', { version: `v${updateInfo.current_version}` })}
-                </p>
-                <div className="flex justify-end gap-2">
-                  <button
-                    onClick={() => setUpdateOpen(false)}
-                    className="px-4 py-1.5 rounded-md text-sm transition-opacity hover:opacity-80"
-                    style={{ background: 'hsl(var(--muted))', color: 'hsl(var(--foreground))' }}
-                  >
-                    {t('update.later')}
-                  </button>
-                  <button
-                    onClick={() => { openUrl(updateInfo.release_url).catch(() => {}); }}
-                    className="px-4 py-1.5 rounded-md text-sm font-medium transition-opacity hover:opacity-80 flex items-center gap-1.5"
-                    style={{ background: 'hsl(var(--primary))', color: 'hsl(var(--primary-foreground))' }}
-                  >
-                    <ArrowDownToLine className="w-3.5 h-3.5" />
-                    {t('update.download')}
-                  </button>
-                </div>
-              </>
-            ) : (
-              <>
-                <div className="flex items-center gap-2 mb-2">
-                  <CheckCircle2 className="w-5 h-5" style={{ color: 'hsl(var(--success))' }} />
-                  <span className="font-semibold text-base" style={{ color: 'hsl(var(--foreground))' }}>
-                    {t('update.upToDate')}
-                  </span>
-                </div>
-                <p className="text-sm mb-4" style={{ color: 'hsl(var(--muted-foreground))' }}>
-                  {t('update.upToDateDesc', { version: `v${updateInfo?.current_version}` })}
-                </p>
-                <div className="flex justify-end">
-                  <button
-                    onClick={() => setUpdateOpen(false)}
-                    className="px-4 py-1.5 rounded-md text-sm transition-opacity hover:opacity-80"
-                    style={{ background: 'hsl(var(--muted))', color: 'hsl(var(--foreground))' }}
-                  >
-                    {t('common.close')}
-                  </button>
-                </div>
-              </>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* ── Buy Me a Coffee 弹窗 ── */}
-      {coffeeOpen && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center"
-          style={{ background: 'rgba(0,0,0,0.65)' }}
-          onMouseDown={(e) => { if (e.target === e.currentTarget) setCoffeeOpen(false); }}
-        >
-          <div
-            className="rounded-2xl flex flex-col overflow-hidden"
-            style={{
-              width: 680,
-              background: 'linear-gradient(160deg, #0f1b2d 0%, #0a1220 100%)',
-              border: '1px solid rgba(255,255,255,0.1)',
-              boxShadow: '0 24px 64px rgba(0,0,0,0.7)',
-            }}
-          >
-            {/* 头部：关闭按钮 + 标题 */}
-            <div className="relative flex flex-col items-center pt-8 pb-6 px-8">
-              <button
-                onClick={() => setCoffeeOpen(false)}
-                className="absolute top-4 right-4 w-8 h-8 flex items-center justify-center rounded-full"
-                style={{ background: 'rgba(255,255,255,0.1)', color: 'rgba(255,255,255,0.6)' }}
-              >
-                <XIcon className="w-4 h-4" />
-              </button>
-              <span style={{ fontSize: 44, lineHeight: 1 }}>☕</span>
-              <h2 className="mt-3 text-xl font-bold" style={{ color: '#fff' }}>Buy Me a Coffee</h2>
-              <p className="mt-1.5 text-sm" style={{ color: 'rgba(255,255,255,0.5)' }}>
-                {t('coffee.subtitle')}
-              </p>
-            </div>
-
-            {/* 分隔线 */}
-            <div style={{ height: 1, background: 'rgba(255,255,255,0.08)', margin: '0 0 20px' }} />
-
-            {/* 三列二维码 */}
-            <div className="grid grid-cols-3 gap-5 px-8 pb-6">
-              {([
-                { value: 'https://qr.alipay.com/fkx13794uv9tdzovji5js38',                                              badge: '支', label: '支付宝',   color: '#1677ff', bg: 'rgba(22,119,255,0.10)' },
-                { value: 'wxp://f2f1zWKP3fltcLCdS-146WJHNFD5pqCDWKWSsFTNIwiDh_iPStg8Lsb3WNJ7Fd--wWla',              badge: '微', label: '微信支付', color: '#07c160', bg: 'rgba(7,193,96,0.10)'  },
-                { value: 'https://www.paypal.com/ncp/payment/EH53EYWSBNF6Y',                                          badge: 'P',  label: 'PayPal',   color: '#009cde', bg: 'rgba(0,156,222,0.10)' },
-              ] as const).map(({ value, badge, label, color, bg }) => (
-                <div key={label} className="flex flex-col items-center gap-3">
-                  {/* 品牌标识行 */}
-                  <div className="flex items-center gap-2 self-start">
-                    <span
-                      className="w-6 h-6 rounded-md flex items-center justify-center text-xs font-bold flex-shrink-0"
-                      style={{ background: color, color: '#fff' }}
-                    >
-                      {badge}
-                    </span>
-                    <span className="text-sm font-semibold" style={{ color: '#fff' }}>{label}</span>
-                  </div>
-                  {/* 品牌色二维码 */}
-                  <div
-                    className="w-full rounded-2xl flex items-center justify-center"
-                    style={{ background: bg, border: `1.5px solid ${color}44`, padding: 14 }}
-                  >
-                    <QRCodeSVG
-                      value={value}
-                      size={160}
-                      fgColor={color}
-                      bgColor="transparent"
-                      level="M"
-                      style={{ width: '100%', height: 'auto' }}
-                    />
-                  </div>
-                  {/* 扫码提示 */}
-                  <span className="text-xs" style={{ color: 'rgba(255,255,255,0.4)' }}>{t('coffee.scanToPay')}</span>
-                </div>
-              ))}
-            </div>
-
-            {/* 底部 */}
-            <div
-              className="py-3.5 text-center text-xs"
-              style={{ color: 'rgba(255,255,255,0.35)', background: 'rgba(255,255,255,0.04)', borderTop: '1px solid rgba(255,255,255,0.07)' }}
-            >
-              {t('coffee.footer')}
-            </div>
-          </div>
-        </div>
-      )}
+      {/* ── 打赏弹窗（payment-server 动态下单 + 二维码 + 轮询确认）── */}
+      <TipDialog open={coffeeOpen} onClose={() => setCoffeeOpen(false)} />
 
       {/* ── 系统管理弹窗 ── */}
       {settingsOpen && (
@@ -827,19 +675,109 @@ export default function MainPage() {
                 </div>
               )}
               {settingsTab === 'about' && (
-                <div className="flex flex-col items-center gap-5 py-4">
-                  <div className="w-14 h-14 rounded-2xl flex items-center justify-center" style={{ background: 'hsl(var(--primary))' }}>
-                    <Cpu className="w-7 h-7" style={{ color: 'white' }} />
+                <div className="flex flex-col gap-5 py-1">
+                  {/* 应用信息 */}
+                  <div className="flex items-center gap-3">
+                    <div className="w-11 h-11 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: 'hsl(var(--primary))' }}>
+                      <Cpu className="w-6 h-6" style={{ color: 'white' }} />
+                    </div>
+                    <div className="min-w-0">
+                      <div className="text-base font-semibold">Easy Dataset</div>
+                      <div className="text-xs mt-0.5" style={{ color: 'hsl(var(--muted-foreground))' }}>
+                        {t('settings.version', { version: `v${appVersion}` })} · {t('settings.aboutTagline')}
+                      </div>
+                    </div>
                   </div>
-                  <div className="text-center">
-                    <div className="text-lg font-bold">Easy Dataset</div>
-                    <div className="text-sm mt-1" style={{ color: 'hsl(var(--muted-foreground))' }}>{t('settings.aboutDesc')}</div>
+
+                  <div className="h-px flex-shrink-0" style={{ background: 'hsl(var(--border))' }} />
+
+                  {/* 产品主页 */}
+                  <div className="flex flex-col gap-1.5">
+                    <p className="text-xs font-medium" style={{ color: 'hsl(var(--muted-foreground))' }}>{t('about.productHome')}</p>
+                    <button
+                      onClick={() => openExternal(PRODUCT_HOME_URL)}
+                      title="eds.tsagent.cc"
+                      className="flex items-center gap-2 text-xs hover:opacity-70 transition-opacity"
+                      style={{ color: 'hsl(var(--foreground))' }}
+                    >
+                      <Globe className="w-4 h-4 flex-shrink-0" />
+                      <span className="flex-1 text-left">{t('about.productTitle')}</span>
+                      <ExternalLink className="w-3 h-3 flex-shrink-0 opacity-60" />
+                    </button>
                   </div>
-                  <div className="text-xs px-4 py-2 rounded-full font-medium" style={{ background: 'hsl(var(--accent))', color: 'hsl(var(--muted-foreground))', border: '1px solid hsl(var(--border))' }}>
-                    {t('settings.version', { version: `v${appVersion}` })}
+
+                  {/* 出品方 */}
+                  <div className="flex flex-col gap-1.5">
+                    <p className="text-xs font-medium" style={{ color: 'hsl(var(--muted-foreground))' }}>{t('about.studio')}</p>
+                    <button
+                      onClick={() => openExternal(STUDIO_URL)}
+                      title="tsagent.cc"
+                      className="flex items-center gap-2 text-xs hover:opacity-70 transition-opacity"
+                      style={{ color: 'hsl(var(--foreground))' }}
+                    >
+                      <span
+                        className="w-4 h-4 rounded flex items-center justify-center text-[9px] font-bold flex-shrink-0"
+                        style={{ background: 'hsl(var(--primary))', color: 'hsl(var(--primary-foreground))' }}
+                      >
+                        火
+                      </span>
+                      <span className="flex-1 text-left">{t('about.studioName')}</span>
+                      <ExternalLink className="w-3 h-3 flex-shrink-0 opacity-60" />
+                    </button>
                   </div>
-                  <div className="text-xs text-center leading-6" style={{ color: 'hsl(var(--muted-foreground))' }}>
-                    {t('settings.aboutFeatures')}
+
+                  {/* 代码仓库 */}
+                  <div className="flex flex-col gap-1.5">
+                    <p className="text-xs font-medium" style={{ color: 'hsl(var(--muted-foreground))' }}>{t('about.repo')}</p>
+                    <button
+                      onClick={() => openExternal(REPO_URL)}
+                      title="github.com/MWang-TS/easy-dataset"
+                      className="flex items-center gap-2 text-xs hover:opacity-70 transition-opacity"
+                      style={{ color: 'hsl(var(--foreground))' }}
+                    >
+                      <Github className="w-4 h-4 flex-shrink-0" />
+                      <span className="flex-1 text-left">{t('about.repoName')}</span>
+                      <ExternalLink className="w-3 h-3 flex-shrink-0 opacity-60" />
+                    </button>
+                  </div>
+
+                  {/* 联系作者 */}
+                  <div className="flex flex-col gap-1.5">
+                    <p className="text-xs font-medium" style={{ color: 'hsl(var(--muted-foreground))' }}>{t('about.contact')}</p>
+                    <button
+                      onClick={() => openExternal(`mailto:${CONTACT_EMAIL}`)}
+                      className="flex items-center gap-2 text-xs hover:opacity-70 transition-opacity"
+                      style={{ color: 'hsl(var(--foreground))' }}
+                    >
+                      <Mail className="w-4 h-4 flex-shrink-0" />
+                      <span className="flex-1 text-left">{CONTACT_EMAIL}</span>
+                    </button>
+                  </div>
+
+                  {/* 检查更新 */}
+                  <div className="flex flex-col gap-1.5">
+                    <p className="text-xs font-medium" style={{ color: 'hsl(var(--muted-foreground))' }}>{t('about.update')}</p>
+                    <button
+                      onClick={() => { setSettingsOpen(false); handleCheckUpdate(); }}
+                      disabled={checking}
+                      className="flex items-center gap-2 text-xs hover:opacity-70 transition-opacity disabled:opacity-50"
+                      style={{ color: 'hsl(var(--foreground))' }}
+                    >
+                      <ArrowDownToLine className={cn('w-4 h-4 flex-shrink-0', checking && 'animate-bounce')} />
+                      <span className="flex-1 text-left">{t('settings.checkUpdate')}</span>
+                    </button>
+                  </div>
+
+                  {/* 版权 */}
+                  <div className="pt-1 flex flex-col gap-1">
+                    <div className="h-px flex-shrink-0 mb-2" style={{ background: 'hsl(var(--border))' }} />
+                    <p className="flex items-start gap-1.5 text-[11px] leading-relaxed" style={{ color: 'hsl(var(--muted-foreground))' }}>
+                      <Copyright className="w-3 h-3 mt-0.5 flex-shrink-0" />
+                      <span>{t('about.copyright', { year: new Date().getFullYear() })}</span>
+                    </p>
+                    <p className="text-[11px] leading-relaxed" style={{ color: 'hsl(var(--muted-foreground))' }}>
+                      {t('about.license')}
+                    </p>
                   </div>
                 </div>
               )}

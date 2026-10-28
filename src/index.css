@@ -56,7 +56,11 @@
     min-height: 100vh;
     background: #1e1e1e;
     color: hsl(var(--foreground));
-    font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    /* 跨平台字体栈：Windows 用 Segoe UI，macOS 用 SF/PingFang，
+       Linux 落到 Noto Sans CJK，避免打包后在非 Windows 上中英文糊成一片 */
+    font-family:
+      system-ui, -apple-system, "Segoe UI", "PingFang SC", "Hiragino Sans GB",
+      "Microsoft YaHei", "Noto Sans CJK SC", "Noto Sans SC", sans-serif;
     font-size: 14px;
     line-height: 1.6;
     -webkit-font-smoothing: antialiased;

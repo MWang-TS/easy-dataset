@@ -14,6 +14,7 @@
     "dialog:allow-confirm",
     "dialog:allow-save",
     "opener:allow-open-url",
+    "opener:allow-default-urls",
     "store:allow-get",
     "store:allow-set",
     "store:allow-load",

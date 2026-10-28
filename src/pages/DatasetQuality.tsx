@@ -358,11 +358,11 @@ export default function DatasetQuality() {
 
           <div className="mt-4 grid grid-cols-2 gap-2 text-xs" style={{ color: "hsl(var(--muted-foreground))" }}>
             <div className="rounded-md px-3 py-2" style={{ background: "hsl(var(--muted))", border: "1px solid hsl(var(--border))" }}>
-              t('quality.loadModeLabel')
+              {t('quality.loadModeLabel')}
               <div className="mt-1 text-sm" style={{ color: "hsl(var(--foreground))" }}>{loadMode === "manual" ? t('quality.modeManual') : t('quality.modeYaml')}</div>
             </div>
             <div className="rounded-md px-3 py-2" style={{ background: "hsl(var(--muted))", border: "1px solid hsl(var(--border))" }}>
-              t('quality.resultStatus')
+              {t('quality.resultStatus')}
               <div className="mt-1 text-sm" style={{ color: error ? "hsl(var(--destructive))" : "hsl(var(--foreground))" }}>
                 {error ? t('quality.resultFailed') : result ? t('quality.resultReady') : t('quality.resultPending')}
               </div>

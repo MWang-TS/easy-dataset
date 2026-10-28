@@ -77,46 +77,9 @@ export async function getAppDir(): Promise<string> {
   return invoke<string>("get_app_dir");
 }
 
-/** 通用 HTTP GET，绕过 CORS，返回响应文本（用于版本检查等） */
-export async function fetchText(url: string): Promise<string> {
-  return invoke<string>("fetch_text", { url });
-}
-
-const DOWNLOAD_PAGE = "https://eds.tsagent.cc/index.html";
-
-export interface UpdateInfo {
-  has_update: boolean;
-  latest_version: string;
-  current_version: string;
-  release_url: string;
-}
-
-function compareVersions(a: string, b: string): number {
-  const pa = a.split(".").map(Number);
-  const pb = b.split(".").map(Number);
-  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
-    const diff = (pa[i] || 0) - (pb[i] || 0);
-    if (diff !== 0) return diff;
-  }
-  return 0;
-}
-
-/**
- * 从产品下载页 HTML 解析最新版本，不依赖 GitHub API。
- * 页面需包含 `releases/tag/vX.X.X` 格式的链接（由 sync-r2.yml 生成的 index.html 满足此条件）。
- */
-export async function checkForUpdates(currentVersion: string): Promise<UpdateInfo> {
-  const html = await fetchText(`${DOWNLOAD_PAGE}?_=${Date.now()}`);
-  const match = html.match(/releases\/tag\/v(\d+\.\d+\.\d+)/);
-  if (!match) throw new Error("无法从产品页解析版本信息，请稍后再试");
-  const latest_version = match[1];
-  return {
-    has_update: compareVersions(latest_version, currentVersion) > 0,
-    latest_version,
-    current_version: currentVersion,
-    release_url: DOWNLOAD_PAGE,
-  };
-}
+// 版本检查已迁移到 `src/lib/update.ts`：改为读取发布清单 latest.json，
+// 并能挑出本平台安装包直链。此处不再保留旧的 HTML 解析实现。
+// 通用抓取请直接用 `invoke("fetch_text", { url })`（见 update.ts）。
 
 // ── API 调用（直接 fetch，Tauri 和 Web 均可用）──
 

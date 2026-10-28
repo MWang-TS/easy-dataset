@@ -24,6 +24,7 @@ pub fn run() {
             backend::get_app_dir,
             backend::write_text_file,
             backend::fetch_text,
+            backend::platform_info,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
