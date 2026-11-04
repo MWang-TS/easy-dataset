@@ -17,6 +17,10 @@ node_modules/
 
 # Tauri build artifacts
 src-tauri/target/
+src-tauri/gen/schemas/
+
+# 图标设计草稿（仅本地保留，正式图标在 src-tauri/icons/）
+icon-design/
 
 # IDEs
 .vscode/
@@ -39,6 +43,19 @@ static/previews/*
 *.log
 logs/*
 !logs/.gitkeep
+
+# 本地模型权重（体积大，不入仓；放到 models/ 下即可被内置默认路径使用）
+models/*
+!models/.gitkeep
+
+# 内部/本地文件（不发布到代码仓）
+docs/
+*.code-workspace
+
+# 历史遗留的静态收款码（已改由 payment-server 动态下发）
+public/alipay.jpg
+public/paypal.png
+public/wexinpay.jpg
 
 # OS
 .DS_Store
