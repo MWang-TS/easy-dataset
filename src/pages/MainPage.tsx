@@ -312,11 +312,18 @@ export default function MainPage() {
     }
     setBackendStatus("starting", "正在启动...");
     try {
-      // 若持久化的 appDir 为空（旧配置 bug），实时获取并更新
+      // 每次都向 Rust 取「当前版本」的后端运行目录：
+      // 升级安装后，持久化配置里的旧路径可能指向不存在的目录或上一版代码，
+      // 直接沿用会出现前端新接口 404 / Failed to fetch。
       let resolvedAppDir = config.appDir;
-      if (!resolvedAppDir) {
-        resolvedAppDir = await getAppDir();
-        setConfig({ ...config, appDir: resolvedAppDir });
+      try {
+        const currentAppDir = await getAppDir();
+        if (currentAppDir && currentAppDir !== config.appDir) {
+          resolvedAppDir = currentAppDir;
+          setConfig({ ...config, appDir: currentAppDir });
+        }
+      } catch (e) {
+        if (!resolvedAppDir) throw e;
       }
       // 如果 BackendState 里存有已退出的旧子进程，先清理再启动
       try { await startBackend(config.pythonExe, resolvedAppDir, config.port); }

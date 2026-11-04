@@ -315,23 +315,10 @@ fn sync_backend_runtime_dir(
     resource_dir: &std::path::Path,
     runtime_dir: &std::path::Path,
 ) -> Result<(), String> {
-    const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
-    let version_file = runtime_dir.join(".runtime_version");
-
-    // 检查版本是否匹配；不匹配（或首次安装）则清空旧 runtime 目录，
-    // 确保旧 __pycache__ 字节码不会遮蔽新版 .py 文件
-    let needs_full_sync = if version_file.exists() {
-        match std::fs::read_to_string(&version_file) {
-            Ok(v) => v.trim() != APP_VERSION,
-            Err(_) => true,
-        }
-    } else {
-        true
-    };
-
-    if needs_full_sync && runtime_dir.exists() {
-        std::fs::remove_dir_all(runtime_dir)
-            .map_err(|e| format!("清理旧运行时目录失败: {}", e))?;
+    // 目录按版本分（backend_runtime/<version>），同版本重复启动时才需要清空；
+    // 清空失败（例如文件被正在运行的旧进程占用）不致命，直接覆盖复制即可。
+    if runtime_dir.exists() {
+        let _ = std::fs::remove_dir_all(runtime_dir);
     }
 
     std::fs::create_dir_all(runtime_dir)
@@ -339,11 +326,22 @@ fn sync_backend_runtime_dir(
     copy_dir_recursive(resource_dir, runtime_dir)
         .map_err(|e| format!("同步后端文件失败: {}", e))?;
 
-    // 写入当前版本标记
-    std::fs::write(&version_file, APP_VERSION)
-        .map_err(|e| format!("写入版本标记失败: {}", e))?;
+    let _ = std::fs::write(runtime_dir.join(".runtime_version"), env!("CARGO_PKG_VERSION"));
 
     Ok(())
+}
+
+/// 清理其它版本的后端运行目录（尽力而为，失败忽略：可能被仍在运行的旧进程占用）
+#[cfg(not(debug_assertions))]
+fn cleanup_old_runtimes(root: &std::path::Path, keep: &std::path::Path) {
+    if let Ok(entries) = std::fs::read_dir(root) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() && path != keep {
+                let _ = std::fs::remove_dir_all(&path);
+            }
+        }
+    }
 }
 
 #[cfg(not(debug_assertions))]
@@ -401,38 +399,55 @@ fn find_backend_src_dir() -> Result<std::path::PathBuf, String> {
     ))
 }
 
-#[tauri::command]
+/// 已解析的后端运行目录缓存：一个进程只同步一次
+#[cfg(not(debug_assertions))]
+static RUNTIME_DIR: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
+
+/// 解析并同步后端运行目录（幂等）。
+///
+/// debug：直接用项目根目录（`src-tauri` 的上一级）。
+/// release：资源目录（或 BFS 找到的 `_up_`）→ `app_local_data/backend_runtime/<版本>`。
+/// 按版本分目录，避免升级时清空旧目录撞上仍在运行的旧后端进程。
 #[allow(unused_variables)]
-pub fn get_app_dir(app: tauri::AppHandle) -> Result<String, String> {
+pub fn ensure_backend_runtime(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
     #[cfg(debug_assertions)]
     {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .parent()
-            .ok_or_else(|| "找不到项目根目录".to_string())?
-            .to_string_lossy()
-            .to_string();
-        return Ok(path);
+            .ok_or_else(|| "找不到项目根目录".to_string())?;
+        return Ok(path.to_path_buf());
     }
     #[cfg(not(debug_assertions))]
     {
-        // 优先用 Tauri resource_dir（跨平台正确路径）
-        let src_dir = app.path().resource_dir()
-            .map_err(|e| format!("获取资源目录失败: {}", e))?;
+        if let Some(dir) = RUNTIME_DIR.get() {
+            return Ok(dir.clone());
+        }
 
-        // 验证 app.py 确实在 resource_dir（或其子目录）
-        let src_dir = if src_dir.join("app.py").exists() && src_dir.join("config.py").exists() {
-            src_dir
+        // 优先用 Tauri resource_dir（跨平台正确路径）；NSIS 会把 ../xxx 资源放进 _up_
+        let resource_dir = app.path().resource_dir()
+            .map_err(|e| format!("获取资源目录失败: {}", e))?;
+        let src_dir = if resource_dir.join("app.py").exists() && resource_dir.join("config.py").exists() {
+            resource_dir
         } else {
-            // fallback: 旧版 BFS 搜索（兼容非标准打包结构）
             find_backend_src_dir()?
         };
 
-        let runtime_dir = app.path().app_local_data_dir()
+        let root = app.path().app_local_data_dir()
             .map_err(|e| format!("找不到本地数据目录: {}", e))?
             .join("backend_runtime");
+        let runtime_dir = root.join(env!("CARGO_PKG_VERSION"));
+
         sync_backend_runtime_dir(&src_dir, &runtime_dir)?;
-        Ok(runtime_dir.to_string_lossy().to_string())
+        cleanup_old_runtimes(&root, &runtime_dir);
+
+        let _ = RUNTIME_DIR.set(runtime_dir.clone());
+        Ok(runtime_dir)
     }
+}
+
+#[tauri::command]
+pub fn get_app_dir(app: tauri::AppHandle) -> Result<String, String> {
+    ensure_backend_runtime(&app).map(|p| p.to_string_lossy().to_string())
 }
 
 // ─── 通用 HTTP GET（版本检查等）──────────────────────────────

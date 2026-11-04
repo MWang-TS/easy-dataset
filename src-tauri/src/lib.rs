@@ -38,6 +38,16 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_store::Builder::default().build())
         .manage(BackendState(Mutex::new(None)))
+        .setup(|app| {
+            // 启动即同步后端资源（不依赖任何前端 invoke）：
+            // 升级后即使沿用旧配置，后端也一定跑当前版本的代码。
+            #[cfg(not(debug_assertions))]
+            if let Err(e) = backend::ensure_backend_runtime(app.handle()) {
+                eprintln!("[backend-runtime] 同步失败: {e}");
+            }
+            let _ = app;
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             backend::list_conda_envs,
             backend::validate_conda_env,

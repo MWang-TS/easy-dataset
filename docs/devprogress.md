@@ -363,3 +363,39 @@ pm run build 产物中 APP_VERSION = 1.0.0；cargo check --release 编译 easy-d
 导出的 `environment.yml` 可直接在 Easy Conda（https://easyconda.tsagent.cc/）「导入 environment.yml」创建同款环境；手动等价命令 `conda env create -f environment.yml`。
 
 验证：接口 `include_ai=true/false` 均 200，YAML 可被 PyYAML 解析（name/channels/dependencies + pip 子列表）；`npx tsc --noEmit` 与 `npm run build` 通过。
+
+---
+
+## 2026-11-04 v1.0.1 修复：升级安装后后端仍跑旧代码（接口 404 / Failed to fetch）
+
+### 现象
+
+安装 1.0.0 后，标注页、系统管理·环境依赖等新功能全部失败：
+控制台 `TypeError: Failed to fetch`，后端日志里 `/api/annotation/*` 与 `/api/env/*` 全为 404，
+而 `/api/dataset/*` 等旧接口正常。
+
+### 根因
+
+1. 旧版（0.1.0）把后端运行目录记在 localStorage 的 `config.appDir`（`backend_runtime`，**不区分版本**），
+   该目录里是 **0.1.0 的后端代码**；
+2. 前端只有在 `config.appDir` 为空时才调用 `getAppDir()`，而"资源同步"恰恰只写在 `get_app_dir` 里——
+   于是**升级后正常启动路径根本不会同步**，后端继续用旧代码起服务，新接口自然 404；
+3. 同步逻辑本身还会 `remove_dir_all` 整个不区分版本的目录，可能清掉正在被运行中进程使用的文件；
+4. NSIS 会把 `../app.py` 这类资源放进 `_up_` 子目录，`resource_dir/app.py` 并不存在，只能靠 BFS 兜底，
+   布局与代码假设不一致，升级场景更容易踩空。
+
+### 修复
+
+| 位置 | 改动 |
+|---|---|
+| `src-tauri/src/commands/backend.rs` | 新增 `ensure_backend_runtime()`：运行目录改为 `backend_runtime/<版本>`，按版本隔离；同版本重复启动时尽力清空（失败不致命，直接覆盖）；同步后清理旧版本目录（尽力而为）；`get_app_dir` 复用该函数 |
+| `src-tauri/src/lib.rs` | `setup()` 中**无条件**同步一次后端资源，不再依赖前端 invoke |
+| `src/pages/MainPage.tsx` | 每次启动后端前都向 Rust 取当前版本运行目录，与持久化配置不一致时回写，避免沿用旧路径 |
+| `.github/workflows/release.yml` | 1.0.x 以 pre-release 发布；补充 1.0.1 修复说明 |
+| 版本 | package / tauri.conf / Cargo.toml / Cargo.lock / PRD → 1.0.1 |
+
+### 验证
+
+- `cargo check --release`、`cargo build --release` 通过；`npx tsc --noEmit` 通过
+- 旧安装可直接覆盖安装 1.0.1：启动时后端运行目录变为 `backend_runtime/1.0.1`，新接口可用
+- 预发布构建仍不进 `latest.json` 自动更新通道
