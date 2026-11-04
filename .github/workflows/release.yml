@@ -95,5 +95,5 @@ jobs:
 
             > 打赏完全自愿，不影响任何功能使用。
           releaseDraft: false
-          # v1.0.0 以预发布形式发布；正式版请改回 false
-          prerelease: true
+          # 默认按正式版发布；需要预发布时临时改为 true（v1.0.0 即为预发布）
+          prerelease: false

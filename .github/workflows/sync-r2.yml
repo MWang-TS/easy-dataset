@@ -69,6 +69,19 @@ jobs:
           else
             TAG=$(gh release view --repo "${{ github.repository }}" --json tagName -q .tagName)
           fi
+          # 预发布（pre-release）不进入自动更新通道：
+          # latest.json 只指向最新正式版，否则所有存量用户会被升级到预发布版本。
+          PRE=$(gh release view "$TAG" --repo "${{ github.repository }}" --json isPrerelease -q .isPrerelease 2>/dev/null || echo false)
+          if [ "$PRE" = "true" ]; then
+            STABLE=$(gh release list --repo "${{ github.repository }}" \
+              --exclude-pre-releases --limit 1 --json tagName -q '.[0].tagName' 2>/dev/null || true)
+            if [ -z "$STABLE" ]; then
+              echo "::warning::$TAG is a pre-release and no stable release exists; skipping sync."
+              exit 1
+            fi
+            echo "::notice::$TAG is a pre-release; syncing latest stable $STABLE instead."
+            TAG="$STABLE"
+          fi
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
           echo "Resolved: $TAG (version ${TAG#v})"
