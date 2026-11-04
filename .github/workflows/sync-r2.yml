@@ -84,9 +84,19 @@ jobs:
           fi
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
-          echo "Resolved: $TAG (version ${TAG#v})"
+          # 资产还没上传（构建仍在进行）时直接跳过，避免无意义失败；
+          # Release 工作流完成后的 workflow_run 会再次触发同步。
+          ASSETS=$(gh release view "$TAG" --repo "${{ github.repository }}" --json assets -q '.assets | length' 2>/dev/null || echo 0)
+          if [ "$ASSETS" = "0" ]; then
+            echo "::notice::$TAG has no release assets yet; skipping this sync."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+          echo "Resolved: $TAG (version ${TAG#v}, assets=$ASSETS)"
 
       - name: Download release assets
+        if: steps.tag.outputs.skip != 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -98,6 +108,7 @@ jobs:
           ls -lh assets/
 
       - name: Generate latest.json
+        if: steps.tag.outputs.skip != 'true'
         env:
           VERSION: ${{ steps.tag.outputs.version }}
           RELEASED_AT: ${{ github.event.release.published_at }}
@@ -190,6 +201,7 @@ jobs:
           PYEOF
 
       - name: Sync to Cloudflare R2
+        if: steps.tag.outputs.skip != 'true'
         env:
           AWS_ACCESS_KEY_ID:     ${{ secrets.R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
