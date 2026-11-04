@@ -100,5 +100,5 @@ jobs:
 
             > 打赏完全自愿，不影响任何功能使用。
           releaseDraft: false
-          # 预发布阶段：1.0.x 先以 pre-release 发布（不进入自动更新通道）
-          prerelease: ${{ startsWith(github.ref_name, 'v1.0.') }}
+          # 正式发布（1.0.0 已转为正式版）；预发布时临时改为 true
+          prerelease: false
