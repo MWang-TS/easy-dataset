@@ -366,7 +366,7 @@ pm run build 产物中 APP_VERSION = 1.0.0；cargo check --release 编译 easy-d
 
 ---
 
-## 2026-11-04 v1.0.1 修复：升级安装后后端仍跑旧代码（接口 404 / Failed to fetch）
+## 2026-11-04 v1.0.0（重新构建）修复：升级安装后后端仍跑旧代码（接口 404 / Failed to fetch）
 
 ### 现象
 
@@ -391,11 +391,11 @@ pm run build 产物中 APP_VERSION = 1.0.0；cargo check --release 编译 easy-d
 | `src-tauri/src/commands/backend.rs` | 新增 `ensure_backend_runtime()`：运行目录改为 `backend_runtime/<版本>`，按版本隔离；同版本重复启动时尽力清空（失败不致命，直接覆盖）；同步后清理旧版本目录（尽力而为）；`get_app_dir` 复用该函数 |
 | `src-tauri/src/lib.rs` | `setup()` 中**无条件**同步一次后端资源，不再依赖前端 invoke |
 | `src/pages/MainPage.tsx` | 每次启动后端前都向 Rust 取当前版本运行目录，与持久化配置不一致时回写，避免沿用旧路径 |
-| `.github/workflows/release.yml` | 1.0.x 以 pre-release 发布；补充 1.0.1 修复说明 |
-| 版本 | package / tauri.conf / Cargo.toml / Cargo.lock / PRD → 1.0.1 |
+| `.github/workflows/release.yml` | 1.0.x 以 pre-release 发布；补充本次修复说明 |
+| 版本 | 仍为 1.0.0（删除旧 pre-release / tag 后用同一 tag 重新构建发布） |
 
 ### 验证
 
 - `cargo check --release`、`cargo build --release` 通过；`npx tsc --noEmit` 通过
-- 旧安装可直接覆盖安装 1.0.1：启动时后端运行目录变为 `backend_runtime/1.0.1`，新接口可用
+- 旧安装可直接覆盖安装新的 1.0.0：启动时后端运行目录为 `backend_runtime/1.0.0`，新接口可用
 - 预发布构建仍不进 `latest.json` 自动更新通道
