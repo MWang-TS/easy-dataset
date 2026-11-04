@@ -399,3 +399,16 @@ pm run build 产物中 APP_VERSION = 1.0.0；cargo check --release 编译 easy-d
 - `cargo check --release`、`cargo build --release` 通过；`npx tsc --noEmit` 通过
 - 旧安装可直接覆盖安装新的 1.0.0：启动时后端运行目录为 `backend_runtime/1.0.0`，新接口可用
 - 预发布构建仍不进 `latest.json` 自动更新通道
+
+---
+
+## 2026-11-04 v1.0.0 转为正式发布
+
+| 项 | 结果 |
+|---|---|
+| GitHub Release | `v1.0.0` 由 pre-release 改为正式版，并设为 **Latest**（3 平台安装包齐全） |
+| 自动更新通道 | 手动触发 `sync-r2`：`dl.tsagent.cc/easy-dataset/latest.json` → `version: 1.0.0`，存量 0.1.0 客户端可收到升级提示 |
+| CI 默认策略 | `release.yml` 的 `prerelease` 恢复为 `false`，后续 tag 默认发正式版 |
+| 发布说明 | 去除 Pre-release 提示，补充「后端运行目录按版本同步」修复说明 |
+
+验证：`gh release view v1.0.0` → `isPrerelease=false`；R2 清单 6 个安装包直链 HEAD 200。
