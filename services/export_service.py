@@ -11,16 +11,34 @@ from typing import Dict, List, Optional
 
 from PIL import Image as PILImage
 
+from services.label_format import parse_row, polygon_area
+
 
 class ExportService:
 
     @staticmethod
+    def _label_path_for(image_path: str, image_dir: str, label_dir: str) -> str:
+        """图片 → 标签路径：保留子目录（train/val），回退到 label_dir 根。"""
+        stem = Path(image_path).stem
+        try:
+            rel_dir = os.path.relpath(os.path.dirname(image_path), image_dir)
+        except ValueError:
+            rel_dir = '.'
+        if rel_dir not in ('.', '', os.pardir):
+            candidate = os.path.join(label_dir, rel_dir, stem + '.txt')
+            if os.path.isfile(candidate):
+                return candidate
+        return os.path.join(label_dir, stem + '.txt')
+
+    @staticmethod
     def _collect_images(image_dir: str) -> List[str]:
-        exts = ('*.jpg', '*.jpeg', '*.png', '*.bmp', '*.webp')
+        """收集图片（递归，兼容 dataset/images/train|val 这类子目录布局）。"""
+        exts = {'.jpg', '.jpeg', '.png', '.bmp', '.webp'}
         files = []
-        for ext in exts:
-            files.extend(glob.glob(os.path.join(image_dir, ext)))
-            files.extend(glob.glob(os.path.join(image_dir, ext.upper())))
+        for root, _dirs, names in os.walk(image_dir):
+            for name in names:
+                if os.path.splitext(name)[1].lower() in exts:
+                    files.append(os.path.join(root, name))
         return sorted(set(files))
 
     @staticmethod
@@ -66,7 +84,7 @@ class ExportService:
             if not class_names:
                 seen_ids: set = set()
                 for p in images_paths:
-                    lbl = os.path.join(label_dir, Path(p).stem + '.txt')
+                    lbl = ExportService._label_path_for(p, image_dir, label_dir)
                     if os.path.isfile(lbl):
                         with open(lbl, 'r') as f:
                             for line in f:
@@ -91,7 +109,7 @@ class ExportService:
             for img_path in images_paths:
                 stem = Path(img_path).stem
                 filename = os.path.basename(img_path)
-                lbl_path = os.path.join(label_dir, stem + '.txt')
+                lbl_path = ExportService._label_path_for(img_path, image_dir, label_dir)
 
                 try:
                     with PILImage.open(img_path) as img:
@@ -110,27 +128,38 @@ class ExportService:
                 if os.path.isfile(lbl_path) and os.path.getsize(lbl_path) > 0:
                     with open(lbl_path, 'r') as f:
                         for line in f:
-                            parts = line.strip().split()
-                            if len(parts) < 5:
+                            row = parse_row(line)
+                            if row is None:
                                 continue
-                            cid = int(parts[0])
-                            cx = float(parts[1])
-                            cy = float(parts[2])
-                            rw = float(parts[3])
-                            rh = float(parts[4])
+                            cid = int(row['class_id'])
+                            polygon = row['polygon']
                             # YOLO 归一化 → COCO 绝对像素 (top-left x, y, w, h)
-                            x_min = (cx - rw / 2) * W
-                            y_min = (cy - rh / 2) * H
-                            bw = rw * W
-                            bh = rh * H
+                            if polygon:
+                                x_min = min(p[0] for p in polygon) * W
+                                y_min = min(p[1] for p in polygon) * H
+                                bw = row['w'] * W
+                                bh = row['h'] * H
+                                segmentation = [[
+                                    round(v, 2)
+                                    for point in polygon
+                                    for v in (point[0] * W, point[1] * H)
+                                ]]
+                                area = round(polygon_area(polygon) * W * H, 2)
+                            else:
+                                x_min = (row['cx'] - row['w'] / 2) * W
+                                y_min = (row['cy'] - row['h'] / 2) * H
+                                bw = row['w'] * W
+                                bh = row['h'] * H
+                                segmentation = []
+                                area = round(bw * bh, 2)
                             coco['annotations'].append({
                                 'id': ann_id,
                                 'image_id': img_id,
                                 'category_id': cid + 1,
                                 'bbox': [round(x_min, 2), round(y_min, 2), round(bw, 2), round(bh, 2)],
-                                'area': round(bw * bh, 2),
+                                'area': area,
                                 'iscrowd': 0,
-                                'segmentation': [],
+                                'segmentation': segmentation,
                             })
                             ann_id += 1
 

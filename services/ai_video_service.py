@@ -1,6 +1,9 @@
 """
 services/ai_video_service.py
-AI 视频智能抽帧：YOLOv8 推理，仅保留含目标类别的帧。
+AI 视频智能抽帧：ultralytics 模型推理，仅保留含目标类别的帧。
+
+模型不限 YOLOv8：凡 ultralytics 能加载的权重都可用（YOLOv5/v8/v9/v10/v11/v12、RT-DETR，
+以及导出的 .onnx / .engine / .torchscript 等）。检测/分割/姿态读 boxes，旋转框读 obb。
 
 支持两种模式：
   pipeline 模式（默认）：单路顺序读帧 -> 有界队列 -> 批量 GPU 推理
@@ -17,6 +20,8 @@ import threading
 import cv2
 
 from services.image_io import imwrite_unicode
+from services.model_utils import check_model_file
+from services.proc import no_window_kwargs
 
 _tasks: dict = {}
 _tasks_lock = threading.Lock()
@@ -38,13 +43,28 @@ def _load_model_fresh(model_path: str):
         return YOLO(model_path)
 
 
+def _hit_class_ids(result) -> list:
+    """取一帧结果里的类别 id：兼容检测/分割/姿态（boxes）与旋转框（obb）。"""
+    ids = []
+    for attr in ("boxes", "obb"):
+        head = getattr(result, attr, None)
+        cls = getattr(head, "cls", None) if head is not None else None
+        if cls is None:
+            continue
+        try:
+            ids.extend(int(c) for c in cls.tolist())
+        except (AttributeError, ValueError, TypeError):
+            continue
+    return ids
+
+
 def _ffmpeg_split(video_path: str, temp_dir: str, segment_seconds: int,
                   stop_event: threading.Event,
                   task: dict = None, total_seconds: float = 0) -> list:
     """用 ffmpeg 把视频切成等长段（-c copy 快速无损）。返回段文件路径列表。"""
     seg_pattern = os.path.join(temp_dir, "seg_%04d.mp4")
     cmd = [
-        "ffmpeg", "-y", "-i", video_path,
+        "ffmpeg", "-nostdin", "-y", "-i", video_path,
         "-c", "copy",
         "-f", "segment",
         "-segment_time", str(segment_seconds),
@@ -52,8 +72,10 @@ def _ffmpeg_split(video_path: str, temp_dir: str, segment_seconds: int,
         "-progress", "pipe:2",   # 把 progress 输出到 stderr
         seg_pattern,
     ]
+    # no_window_kwargs：Windows 下用 CREATE_NO_WINDOW + 读 stdin 置空，避免弹出黑色控制台
     proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL,
-                            stderr=subprocess.PIPE, text=True)
+                            stderr=subprocess.PIPE, text=True,
+                            **no_window_kwargs())
 
     import re
     time_pat = re.compile(r"out_time_ms=(\d+)")
@@ -197,13 +219,12 @@ def _infer_segment_simple(
         for i, r in enumerate(results):
             if stop_event.is_set():
                 break
-            if r.boxes is not None and len(r.boxes):
-                for cls_id in r.boxes.cls.tolist():
-                    if model.names.get(int(cls_id), "").lower() in target_set:
-                        fname = f"{prefix}_{batch_gfis[i]:08d}.{ext}"
-                        imwrite_unicode(os.path.join(output_dir, fname), batch_frames[i], write_params)
-                        newly += 1
-                        break
+            for cls_id in _hit_class_ids(r):
+                if model.names.get(int(cls_id), "").lower() in target_set:
+                    fname = f"{prefix}_{batch_gfis[i]:08d}.{ext}"
+                    imwrite_unicode(os.path.join(output_dir, fname), batch_frames[i], write_params)
+                    newly += 1
+                    break
         saved_local += newly
         batch_frames.clear(); batch_gfis.clear()
         with task_counters["lock"]:
@@ -324,11 +345,10 @@ def _infer_segment(
             if stop_event.is_set():
                 break
             hit = False
-            if r.boxes is not None and len(r.boxes):
-                for cls_id in r.boxes.cls.tolist():
-                    if model.names.get(int(cls_id), "").lower() in target_set:
-                        hit = True
-                        break
+            for cls_id in _hit_class_ids(r):
+                if model.names.get(int(cls_id), "").lower() in target_set:
+                    hit = True
+                    break
             if hit:
                 fname = f"{prefix}_{batch_gfis[i]:08d}.{ext}"
                 imwrite_unicode(os.path.join(output_dir, fname), batch_frames[i], write_params)
@@ -398,7 +418,7 @@ class AIVideoService:
                 "available": False,
                 "message": (
                     f"缺少依赖：{', '.join(missing)}。"
-                    "请切换到 yolov8-gpu conda 环境后重启后端再使用 AI 抽帧"
+                    "请安装 ultralytics 与 ffmpeg 后重启后端再使用 AI 抽帧"
                 ),
             }
         return {"available": True, "version": version}
@@ -453,8 +473,9 @@ class AIVideoService:
 
         if not os.path.isfile(video_path):
             return {"success": False, "message": f"视频文件不存在: {video_path}"}
-        if not os.path.isfile(model_path):
-            return {"success": False, "message": f"模型文件不存在: {model_path}"}
+        model_error = check_model_file(model_path)
+        if model_error:
+            return {"success": False, "message": model_error}
         if not output_dir:
             return {"success": False, "message": "请指定输出目录"}
         if not target_classes:
@@ -713,11 +734,10 @@ class AIVideoService:
                 results = model(batch_frames, verbose=False, conf=conf_threshold)
                 for i, r in enumerate(results):
                     hit = False
-                    if r.boxes is not None and len(r.boxes):
-                        for cls_id in r.boxes.cls.tolist():
-                            if model.names.get(int(cls_id), "").lower() in target_set:
-                                hit = True
-                                break
+                    for cls_id in _hit_class_ids(r):
+                        if model.names.get(int(cls_id), "").lower() in target_set:
+                            hit = True
+                            break
                     if hit:
                         fname = f"{prefix}_{batch_fis[i]:08d}.{ext}"
                         imwrite_unicode(os.path.join(output_dir, fname), batch_frames[i], write_params)

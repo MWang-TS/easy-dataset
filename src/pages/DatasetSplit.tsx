@@ -62,7 +62,7 @@ export default function DatasetSplit() {
   const configPortal = (
     <div className="py-4 flex flex-col gap-4">
 
-      <div className="rounded-md p-4 space-y-4" style={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))" }}>
+      <div className="rounded-xl p-4 space-y-4" style={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))" }}>
         <DirInput label={t('common.imageDir')} value={imageDir} onChange={setImageDir} />
         <DirInput label={t('common.labelDir')} value={labelDir} onChange={setLabelDir} />
         <DirInput label={t('common.outputDir')} value={outputDir} onChange={setOutputDir} />
@@ -171,7 +171,7 @@ export default function DatasetSplit() {
           {result.success && result.counts && (
             <div className="mt-3 grid grid-cols-3 gap-3">
               {Object.entries(result.counts).map(([split, count]) => (
-                <div key={split} className="rounded-md p-3 text-center"
+                <div key={split} className="rounded-lg p-3 text-center"
                   style={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))" }}>
                   <div className="text-lg font-bold">{String(count)}</div>
                   <div className="text-xs mt-1" style={{ color: "hsl(var(--muted-foreground))" }}>{split}</div>

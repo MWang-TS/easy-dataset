@@ -33,6 +33,10 @@ export interface DatasetSummary {
   total_boxes: number;
   num_classes: number;
   invalid_rows: number;
+  rect_rows?: number;
+  polygon_rows?: number;
+  obb_rows?: number;
+  label_type?: "detect" | "obb" | "segment" | "mixed" | "none";
 }
 
 export interface DatasetAnalysis {
@@ -93,7 +97,7 @@ interface AppState {
   backendMessage: string;
 
   // 当前激活页面
-  activePage: "quality" | "viewer" | "convert" | "labels" | "files" | "split" | "export" | "merge" | "augment" | "video";
+  activePage: "quality" | "viewer" | "annotation" | "convert" | "labels" | "files" | "split" | "export" | "merge" | "augment" | "video";
 
   // 当前数据集上下文（跨页面共享）
   currentDatasetDir: string;

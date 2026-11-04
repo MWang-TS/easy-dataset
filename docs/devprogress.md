@@ -1,6 +1,6 @@
 # Easy Dataset Station — 开发进度记录
 
-> 更新时间：2026-05-26
+> 更新时间：2026-11-04
 
 ---
 
@@ -179,6 +179,83 @@
 
 ---
 
+## Phase 4 — 图片标注模块（v0.3.0）
+
+> 实现参考 `easy-finetune` 的 `wiki/Annotation-Implementation-Guide.md`，
+> 宿主层由 Tauri IPC 改为 Flask REST（算法与数据契约保持一致）。
+
+### P4.1 后端标注服务（`services/annotation_service.py`）
+
+| 能力 | 说明 |
+|---|---|
+| `list_images(dir_path, label_output_dir)` | 支持 `images/*`、`images/train|val/*`（split 布局，自动展开子目录）与扁平结构；返回 `box_count` |
+| `detect_class_file(dir_path)` | 打开文件夹时自动解析：`data.yaml`/`dataset.yaml`/`classes.txt`/`obj.names`（含 `labels/` 子目录），向上找 3 层 |
+| `read_label(label_path)` | 矩形行（5 列）与多边形 seg 行（`class + ≥6 坐标`）分别解析；文件缺失返回空数组 |
+| `write_label(label_path, boxes)` | 空列表写空文件（= 确认无目标）；`tmp + os.replace` 原子替换 |
+| `read_image(image_path, max_dim)` | 返回 base64 data URL，长边超过 2560 自动缩小；不做 EXIF 旋转（与训练侧一致） |
+| `scan_class_ids()` | 无类别定义时，从已有标注推断 id 列表 |
+| `parse_class_file()` | 服务端解析 `classes.txt` / `data.yaml` 的 `names`（避免 Tauri fs scope 限制） |
+| `start_auto_label()` | 后台线程跑 ultralytics，轮询进度；`overwrite=false` 时跳过已有 `.txt` |
+| `export_dataset()` | `raw` / `detect` / `segment` 三种模式；随机划分 train/val；自动补 `classes.txt`、`data.yaml` |
+
+路径推导规则（前后端一致）：
+
+| 场景 | 目标路径 |
+|---|---|
+| 指定 `label_output_dir` | `<output>/<stem>.txt` |
+| 路径中有 `images` 目录段 | 该段替换为 `labels`（`images/train/a.jpg` → `labels/train/a.txt`） |
+| 扁平结构 | 与图片同目录 `<stem>.txt` |
+
+> 修复记录：早期实现只判断「父目录是否叫 images」，导致 `images/train/a.jpg` 的标签被推导到
+> `images/train/a.txt`（不存在）→ 标注页显示「0 张已标注」、类别为空。现改为替换任意层级的
+> `images` 目录段。
+
+### P4.2 REST 路由（`routes/main_routes.py`）
+
+```
+POST /api/annotation/list-images
+POST /api/annotation/image
+POST /api/annotation/read-label
+POST /api/annotation/write-label
+POST /api/annotation/scan-class-ids
+POST /api/annotation/parse-classes
+POST /api/annotation/auto-label-check
+POST /api/annotation/auto-label
+POST /api/annotation/auto-label-status
+POST /api/annotation/auto-label-stop
+POST /api/annotation/export
+```
+
+### P4.3 前端状态与 IO（`src/lib/annotation-store.ts`）
+
+- `openFolder` / `loadImage`（带请求序号，避免快速切图错位）
+- 每次编辑自动落盘：250ms 防抖 + 串行保存队列，切图前强制 `flushSave()`
+- 撤销 / 重做（内存快照，最多 50 步）
+- 自动标注：启动 → 600ms 轮询进度 → 完成后刷新列表并重载当前图
+
+### P4.4 Canvas 标注器（`src/components/annotate/AnnotationCanvas.tsx`）
+
+- 三层坐标换算：图片逻辑像素 / CSS 显示像素 / 鼠标事件坐标
+- 命中顺序：多边形顶点 → 多边形内部 → 矩形角手柄 → 矩形内部 → 空白（画新框）
+- 支持：拖动移动、拖角缩放、多边形顶点拖动、滚轮锚点缩放、右键菜单改类别/删除
+- 快捷键：`A/D` 切换图片、`H` 矩形、`P` 多边形、`Z` 平移、`Delete` 删除、`Ctrl+Z` 撤销
+  —— **所有快捷键均先判断 `isTyping`**（输入框内不触发），修复了参考实现的已知缺陷
+
+### P4.5 标注页面（`src/pages/Annotation.tsx`）
+
+- 左侧配置栏（portal）分两种模式：
+  - **已有数据集修改**：数据集路径 / 图像文件夹（可选）/ 标注文件夹（可选）/ 类别定义文件路径 / 标注输出路径（可选，留空原地修改）
+    - 图像、标注目录用于子文件夹命名不规整的数据集（如 `temp/img` + `temp/labels`），留空仍按 `images`/`labels` 推断
+    - 两个目录同时作用于列表、类别扫描、自动标注与导出
+  - **全新标注**：数据集路径（纯图片）/ 标注输出路径（必填）/ 类别名称（逗号分隔，按序生成 class 0/1/2…）
+- 其余：AI 自动预标注（模型、置信度、覆盖开关、进度） / 数据集导出
+- 主区域：工具栏（切图、模式、缩放、撤销重做、删除、保存状态）+ Canvas + 右侧面板（新框类别、框列表、类别管理）
+- 导航栏新增「图片标注」入口（`PenTool`）
+- 打开文件夹后显示图片数量 / 已标注数 / **标注类型**（目标检测 / 分割 / 混合 / 无标注，抽样前 500 个非空标签统计）
+  - 检测类型 → 禁用「多边形」按钮；分割类型 → 禁用「矩形」按钮；混合/无标注 → 两者都可用
+
+---
+
 ## 文件变更清单
 
 ### 新建文件
@@ -188,9 +265,13 @@
 | `services/export_service.py` | COCO JSON 导出服务 |
 | `services/merge_service.py` | 数据集合并服务 |
 | `services/augment_service.py` | 数据增强预览服务 |
+| `services/annotation_service.py` | 图片标注服务（标注读写 + AI 预标注 + 导出） |
 | `src/pages/DatasetExport.tsx` | 导出 & 统计图表页面 |
 | `src/pages/DatasetMerge.tsx` | 数据集合并页面 |
 | `src/pages/AugmentPreview.tsx` | 增强预览页面 |
+| `src/pages/Annotation.tsx` | 图片标注页面 |
+| `src/lib/annotation-store.ts` | 标注状态与保存队列 |
+| `src/components/annotate/AnnotationCanvas.tsx` | Canvas 2D 标注器 |
 
 ### 修改文件
 
@@ -201,3 +282,84 @@
 | `src/lib/store.ts` | 类型补全：`ClassDist.ratio`、`DatasetSummary.invalid_rows`、`image_size_stats` height 字段、`ImageItem.box_count`；`activePage` 扩展 3 个新值 |
 | `src/lib/tauri-bridge.ts` | 导入 `save`；新增 `browseSaveFile`；`api` 扩展 4 个新方法；`listImages` 加 filter 参数 |
 | `src/pages/MainPage.tsx` | 导入 3 个新页面组件；NAV_ITEMS 增加 3 项；pages 映射注册 3 个新页面 |
+
+---
+
+## 2026-11-03 标注模块增强（检测 / 旋转框 / 分割）
+
+### 新增能力
+
+| # | 功能 | 说明 |
+|---|---|---|
+| 1 | 三种标注类型 | 全新标注可选「目标检测 / 旋转框 / 分割」，选定后同一工作内锁定不可改（记录持久化） |
+| 2 | 旋转框（OBB） | 按「矩形 + 角度」建模：拖拽出矩形 → 拖框顶圆点旋转 → 拖角点缩放；右侧面板可输入角度；导出 8 坐标 |
+| 3 | 类型互斥 | 检测仅矩形；分割仅多边形；旋转框仅旋转框工具（工具栏 + 平移/编辑开关 + 快捷键均受约束） |
+| 4 | 复制粘贴 | `Ctrl+C` / `Ctrl+V` 复制粘贴标注框（跨图片），右键菜单与工具栏按钮同步；粘贴带偏移、可撤销 |
+| 5 | 清晰矢量层 | 画布拆为「底图 + 叠加层」，叠加层按设备像素重绘，放大时框线/多边形不失真 |
+| 6 | 画布性能与安全 | 叠加层后备缓冲限制 4096px / 16M 像素，底图超 4096px 自动降采样，避免超大图崩溃 |
+| 7 | 质量检测增强 | 统计矩形 / 多边形 / 旋转框行数，标注类型卡片；面积与宽高比按真实几何计算 |
+| 8 | 全链路支持三种格式 | 数据质量、可视化预览、数据增强、COCO 导出、VOC 转换、LabelMe 转换均按矩形/多边形/旋转框分别处理 |
+| 9 | 模型不限 YOLOv8 | 自动标注与智能抽帧统一走 ultralytics；抽帧兼容 OBB 模型（读 `result.obb`）；新增模型格式与任务校验 |
+
+### 修复
+
+- 数据集导出循环内 `label_dir` / `image_dir` 变量覆盖参数，导致第 2 张图起读不到标注（丢标签）。
+- 质量检测把多边形行第 3/4 个数字当作 w/h，面积、宽高比、大小目标统计全错。
+- 智能抽帧只读 `result.boxes`，OBB 模型抽不到任何帧。
+- 「平移 → 编辑」切回时恢复成矩形工具，旋转框类型下只能画垂直框。
+- 旧工作记录的标注类型会静默覆盖用户本次选择。
+
+### 新增文件
+
+| 文件 | 用途 |
+|---|---|
+| `services/label_format.py` | 统一 YOLO 标签行解析/格式化（矩形 / 多边形 / 旋转矩形判定） |
+| `services/model_utils.py` | 模型文件格式与任务类型校验 |
+| `src/lib/obb.ts` | 旋转框几何：角点、反解、角点缩放、旋转手柄 |
+
+---
+
+## 2026-11-03 客户端运行时不弹后端终端窗口
+
+| 位置 | 处理 |
+|---|---|
+| `src-tauri/src/main.rs` | release 构建使用 `windows_subsystem = "windows"`（已核实产物 PE Subsystem = 2/GUI） |
+| `src-tauri/src/lib.rs` | 运行时兜底：release 下调用 `GetConsoleWindow` + `ShowWindow(SW_HIDE)` 隐藏任何意外控制台 |
+| `src-tauri/src/commands/backend.rs` | 启动 Python 后端已带 `CREATE_NO_WINDOW`；新增 `terminate_child()`，Windows 下用 `taskkill /T /F` 连带子进程结束，避免 ffmpeg 残留窗口 |
+| `services/proc.py`（新增） | `no_window_kwargs()` 供显式调用；`patch_popen_no_window()` 在嵌入式模式下把所有 `subprocess` 默认设为 `CREATE_NO_WINDOW` |
+| `services/ai_video_service.py` | ffmpeg 分段子进程加 `no_window_kwargs()` 与 `-nostdin`，不再弹出黑色窗口 |
+| `app.py` | 启动时（仅 `EASY_DATASET_EMBEDDED=1`）打 `subprocess` 补丁，覆盖 ultralytics / pip 等第三方派生的子进程 |
+
+验证：`cargo build --release` 通过；PE 子系统 = 2（GUI）；`patch_popen_no_window()` 生效且子进程可正常执行；Python/TS 全量语法与类型检查通过。
+
+---
+
+## 2026-11-04 版本号统一升级到 v1.0.0
+
+| 文件 | 变更 |
+|---|---|
+| package.json / package-lock.json | version 升级为 1.0.0（构建期通过 __APP_VERSION__ 注入前端） |
+| src-tauri/tauri.conf.json | 安装包版本 1.0.0 |
+| src-tauri/Cargo.toml / Cargo.lock | crate 版本 1.0.0（CARGO_PKG_VERSION 用于后端资源同步判定，升级后首次启动会全量同步一次） |
+| docs/PRD.md | 文档版本、/health 示例、版本规划标题改为 v1.0.0 |
+
+验证：
+pm run build 产物中 APP_VERSION = 1.0.0；cargo check --release 编译 easy-dataset v1.0.0 通过；全仓扫描（排除依赖与构建产物）无旧版本号残留。
+
+---
+
+## 2026-11-04 系统管理新增「环境依赖」页签（支持 Easy Conda 导出）
+
+| 文件 | 变更 |
+|---|---|
+| `services/env_service.py`（新增） | 读取 `requirements.txt` 生成分组依赖清单（Python 运行时 / 系统工具 / 必装 pip / AI 可选），并生成标准 conda `environment.yml`；探测当前环境已安装版本 |
+| `routes/main_routes.py` | 新增 `GET/POST /api/env/dependencies`（参数 `include_ai`） |
+| `src/lib/tauri-bridge.ts` | 新增 `api.envDependencies()` 类型定义 |
+| `src/pages/MainPage.tsx` | 系统管理弹窗新增「环境依赖」页签：依赖分组列表、已安装版本标记、AI 依赖开关、导出 environment.yml（另存为对话框）、Easy Conda 入口 |
+| `src/lib/links.ts` | 新增 `EASY_CONDA_URL` |
+| 三语 i18n | `settings.tabDeps` 等 10 个文案 + `common.retry` |
+| `README.md` | 功能表补充 |
+
+导出的 `environment.yml` 可直接在 Easy Conda（https://easyconda.tsagent.cc/）「导入 environment.yml」创建同款环境；手动等价命令 `conda env create -f environment.yml`。
+
+验证：接口 `include_ai=true/false` 均 200，YAML 可被 PyYAML 解析（name/channels/dependencies + pip 子列表）；`npx tsc --noEmit` 与 `npm run build` 通过。

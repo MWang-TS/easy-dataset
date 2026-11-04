@@ -22,6 +22,8 @@ from typing import Dict, List, Optional
 
 from PIL import Image, ImageEnhance, ImageDraw
 
+from services.label_format import is_rotated, parse_file, polygon_bbox
+
 _COLORS = [
     (255, 56, 56), (255, 157, 151), (255, 112, 31), (255, 178, 29),
     (207, 210, 49), (72, 249, 10), (146, 204, 23), (61, 219, 134),
@@ -42,32 +44,55 @@ AUGMENT_DEFS: Dict[str, str] = {
 }
 
 
-def _parse_labels(label_path: str) -> List[List[float]]:
-    """解析 YOLO 标签，返回 [[cid, cx, cy, w, h], ...] 列表"""
-    rows: List[List[float]] = []
-    if label_path and os.path.isfile(label_path) and os.path.getsize(label_path) > 0:
-        with open(label_path, 'r') as f:
-            for line in f:
-                parts = line.strip().split()
-                if len(parts) >= 5:
-                    rows.append([int(parts[0])] + [float(x) for x in parts[1:5]])
-    return rows
+def _parse_labels(label_path: str) -> List[Dict]:
+    """解析 YOLO 标签（矩形 / 多边形 / 旋转框统一解析）。"""
+    if not label_path:
+        return []
+    return parse_file(label_path)
 
 
-def _draw_boxes(img: Image.Image, boxes: List[List[float]], class_names: Optional[List[str]]) -> None:
+def _row_corners(row: Dict) -> List[List[float]]:
+    """取 row 的顶点列表：多边形原样返回，矩形返回 4 个角点。"""
+    if row.get('polygon'):
+        return [list(p) for p in row['polygon']]
+    cx, cy, w, h = row['cx'], row['cy'], row['w'], row['h']
+    return [[cx - w / 2, cy - h / 2], [cx + w / 2, cy - h / 2],
+            [cx + w / 2, cy + h / 2], [cx - w / 2, cy + h / 2]]
+
+
+def _draw_boxes(img: Image.Image, rows: List[Dict], class_names: Optional[List[str]]) -> None:
     W, H = img.size
     draw = ImageDraw.Draw(img)
-    for box in boxes:
-        cid, cx, cy, w, h = int(box[0]), box[1], box[2], box[3], box[4]
-        x1 = int((cx - w / 2) * W)
-        y1 = int((cy - h / 2) * H)
-        x2 = int((cx + w / 2) * W)
-        y2 = int((cy + h / 2) * H)
+    overlay = Image.new('RGBA', (W, H), (0, 0, 0, 0))
+    overlay_draw = ImageDraw.Draw(overlay)
+    for row in rows:
+        cid = int(row['class_id'])
         color = _COLORS[cid % len(_COLORS)]
-        draw.rectangle([x1, y1, x2, y2], outline=color, width=2)
         name = (class_names[cid] if class_names and cid < len(class_names) else str(cid))
+        polygon = row.get('polygon')
+        if polygon:
+            poly = [(int(x * W), int(y * H)) for x, y in polygon]
+            if is_rotated(polygon):
+                # 旋转框：轮廓 + 顶点
+                overlay_draw.line(poly + [poly[0]], fill=(*color, 255), width=2)
+                for px, py in poly:
+                    overlay_draw.ellipse([px - 3, py - 3, px + 3, py + 3], fill=(*color, 255))
+            else:
+                overlay_draw.polygon(poly, fill=(*color, 80))
+                overlay_draw.line(poly + [poly[0]], fill=(*color, 230), width=2)
+            x1 = min(p[0] for p in poly)
+            y1 = min(p[1] for p in poly)
+        else:
+            x1 = int((row['cx'] - row['w'] / 2) * W)
+            y1 = int((row['cy'] - row['h'] / 2) * H)
+            x2 = int((row['cx'] + row['w'] / 2) * W)
+            y2 = int((row['cy'] + row['h'] / 2) * H)
+            draw.rectangle([x1, y1, x2, y2], outline=color, width=2)
+
         draw.rectangle([x1, y1 - 16, x1 + len(name) * 7 + 4, y1], fill=color)
         draw.text((x1 + 2, y1 - 15), name, fill=(255, 255, 255))
+
+    img.paste(Image.alpha_composite(img.convert('RGBA'), overlay).convert('RGB'), (0, 0))
 
 
 def _img_to_b64(img: Image.Image) -> str:
@@ -76,56 +101,65 @@ def _img_to_b64(img: Image.Image) -> str:
     return base64.b64encode(buf.getvalue()).decode('utf-8')
 
 
-def _apply(img: Image.Image, boxes: List[List[float]], aug: str):
-    """对图片和 bbox 同步应用一种增强，返回 (new_img, new_boxes)"""
-    new_boxes: List[List[float]] = []
+def _transform_point(x: float, y: float, aug: str):
+    """归一化点坐标变换（与图片几何变换同步）。"""
+    if aug == 'flip_h':
+        return 1 - x, y
+    if aug == 'flip_v':
+        return x, 1 - y
+    if aug == 'rotate90':
+        return 1 - y, x
+    if aug == 'rotate180':
+        return 1 - x, 1 - y
+    if aug == 'rotate270':
+        return y, 1 - x
+    return x, y
+
+
+def _transform_row(row: Dict, aug: str) -> Dict:
+    """把一条标注按几何变换重算（矩形统一走 4 角点 → 外接矩形）。"""
+    corners = _row_corners(row)
+    moved = [_transform_point(x, y, aug) for x, y in corners]
+    polygon = row.get('polygon')
+    if polygon:
+        cx, cy, w, h = polygon_bbox(moved)
+        return {'class_id': row['class_id'], 'polygon': moved,
+                'cx': cx, 'cy': cy, 'w': w, 'h': h}
+    cx, cy, w, h = polygon_bbox(moved)
+    return {'class_id': row['class_id'], 'polygon': None,
+            'cx': cx, 'cy': cy, 'w': w, 'h': h}
+
+
+def _apply(img: Image.Image, rows: List[Dict], aug: str):
+    """对图片和标注同步应用一种增强，返回 (new_img, new_rows)"""
+    geometric = aug in ('flip_h', 'flip_v', 'rotate90', 'rotate180', 'rotate270')
 
     if aug == 'flip_h':
         img = img.transpose(Image.FLIP_LEFT_RIGHT)
-        for b in boxes:
-            new_boxes.append([b[0], 1 - b[1], b[2], b[3], b[4]])
-
     elif aug == 'flip_v':
         img = img.transpose(Image.FLIP_TOP_BOTTOM)
-        for b in boxes:
-            new_boxes.append([b[0], b[1], 1 - b[2], b[3], b[4]])
-
     elif aug == 'rotate90':
         # PIL ROTATE_270 = 逆时针 270° = 视觉上顺时针 90°
         img = img.transpose(Image.ROTATE_270)
-        for b in boxes:
-            cid, cx, cy, w, h = b
-            new_boxes.append([cid, 1 - cy, cx, h, w])
-
     elif aug == 'rotate180':
         img = img.transpose(Image.ROTATE_180)
-        for b in boxes:
-            cid, cx, cy, w, h = b
-            new_boxes.append([cid, 1 - cx, 1 - cy, w, h])
-
     elif aug == 'rotate270':
         # PIL ROTATE_90 = 逆时针 90° = 视觉上顺时针 270°
         img = img.transpose(Image.ROTATE_90)
-        for b in boxes:
-            cid, cx, cy, w, h = b
-            new_boxes.append([cid, cy, 1 - cx, h, w])
-
     elif aug == 'brightness':
         img = ImageEnhance.Brightness(img).enhance(1.6)
-        new_boxes = [b[:] for b in boxes]
-
     elif aug == 'contrast':
         img = ImageEnhance.Contrast(img).enhance(1.6)
-        new_boxes = [b[:] for b in boxes]
-
     elif aug == 'grayscale':
         img = img.convert('L').convert('RGB')
-        new_boxes = [b[:] for b in boxes]
 
+    if geometric:
+        new_rows = [_transform_row(row, aug) for row in rows]
     else:
-        new_boxes = [b[:] for b in boxes]
+        new_rows = [{**row, 'polygon': [list(p) for p in row['polygon']] if row.get('polygon') else None}
+                    for row in rows]
 
-    return img, new_boxes
+    return img, new_rows
 
 
 class AugmentService:
@@ -163,7 +197,7 @@ class AugmentService:
             for aug in augments:
                 if aug not in AUGMENT_DEFS:
                     continue
-                aug_img, aug_boxes = _apply(base_img.copy(), [b[:] for b in boxes], aug)
+                aug_img, aug_boxes = _apply(base_img.copy(), boxes, aug)
                 _draw_boxes(aug_img, aug_boxes, class_names)
                 results.append({
                     'aug': aug,

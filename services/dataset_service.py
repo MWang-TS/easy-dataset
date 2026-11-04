@@ -16,6 +16,14 @@ import yaml
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
+from services.label_format import (
+    is_rect_quad,
+    label_type_name,
+    parse_file,
+    parse_row,
+    polygon_area,
+)
+
 # 预设颜色池（RGB）
 _COLORS = [
     (255, 56, 56), (255, 157, 151), (255, 112, 31), (255, 178, 29),
@@ -140,21 +148,33 @@ class DatasetService:
             bbox_aspects: List[float] = []
             total_boxes = 0
             invalid_rows = 0
+            rect_rows = 0
+            polygon_rows = 0
+            quad_rows = 0
             for lbl_path in labels:
                 if os.path.getsize(lbl_path) == 0:
                     continue
                 with open(lbl_path, 'r') as f:
                     for line in f:
-                        parts = line.strip().split()
-                        if len(parts) < 5:
-                            if parts:  # 非空行才计为无效
-                                invalid_rows += 1
+                        if not line.strip():
                             continue
-                        cid = int(parts[0])
-                        w = float(parts[3])
-                        h = float(parts[4])
+                        row = parse_row(line)
+                        if row is None:
+                            invalid_rows += 1
+                            continue
+                        cid = int(row['class_id'])
+                        polygon = row['polygon']
+                        if polygon:
+                            polygon_rows += 1
+                            if is_rect_quad(polygon):
+                                quad_rows += 1
+                            area = polygon_area(polygon)
+                        else:
+                            rect_rows += 1
+                            area = row['w'] * row['h']
+                        w, h = row['w'], row['h']
                         class_counts[cid] = class_counts.get(cid, 0) + 1
-                        bbox_areas.append(w * h)
+                        bbox_areas.append(area)
                         bbox_aspects.append(w / h if h > 0 else 0)
                         total_boxes += 1
 
@@ -187,6 +207,10 @@ class DatasetService:
                     'total_boxes': total_boxes,
                     'num_classes': len(class_counts),
                     'invalid_rows': invalid_rows,
+                    'rect_rows': rect_rows,
+                    'polygon_rows': polygon_rows,
+                    'obb_rows': quad_rows,
+                    'label_type': label_type_name(rect_rows, polygon_rows, quad_rows),
                 },
                 'class_distribution': class_dist,
                 'class_names': class_names,
@@ -313,14 +337,12 @@ class DatasetService:
             for lbl_path in labels:
                 if os.path.getsize(lbl_path) == 0:
                     continue
-                with open(lbl_path, 'r') as f:
-                    for line in f:
-                        parts = line.strip().split()
-                        if len(parts) >= 5:
-                            w = float(parts[3])
-                            h = float(parts[4])
-                            areas.append(w * h)
-                            aspects.append(w / h if h > 0 else 0)
+                for row in parse_file(lbl_path):
+                    polygon = row['polygon']
+                    area = polygon_area(polygon) if polygon else row['w'] * row['h']
+                    w, h = row['w'], row['h']
+                    areas.append(area)
+                    aspects.append(w / h if h > 0 else 0)
 
             if not areas:
                 return {'success': True, 'area_histogram': [], 'aspect_histogram': [], 'total_boxes': 0}
@@ -381,34 +403,36 @@ class DatasetService:
 
                 with open(label_path, 'r') as f:
                     for line in f:
-                        parts = line.strip().split()
-                        if len(parts) < 5:
+                        row = parse_row(line)
+                        if row is None:
                             continue
-                        cid = int(parts[0])
+                        cid = int(row['class_id'])
                         color = _COLORS[cid % len(_COLORS)]
                         name = (class_names or [])[cid] if class_names and cid < len(class_names) else str(cid)
+                        polygon = row['polygon']
 
-                        # YOLO seg 格式：class_id x1 y1 x2 y2 ... (至少 7 个值，点数为偶数)
-                        coords = [float(v) for v in parts[1:]]
-                        if len(coords) >= 6 and len(coords) % 2 == 0:
-                            # 分割格式：绘制多边形 mask
-                            poly = [(int(coords[i] * W), int(coords[i + 1] * H))
-                                    for i in range(0, len(coords), 2)]
-                            # 半透明填充
-                            overlay_draw.polygon(poly, fill=(*color, 80))
-                            # 多边形轮廓
-                            overlay_draw.line(poly + [poly[0]], fill=(*color, 230), width=2)
-                            # 从多边形计算包围盒用于标签
+                        if polygon:
+                            poly = [(int(x * W), int(y * H)) for x, y in polygon]
+                            if is_rect_quad(polygon):
+                                # 旋转框：只画轮廓（不填充），与分割视觉上区分
+                                overlay_draw.line(poly + [poly[0]], fill=(*color, 255), width=2)
+                                # 4 个角点标出顶点方向
+                                for px, py in poly:
+                                    overlay_draw.ellipse([px - 3, py - 3, px + 3, py + 3],
+                                                         fill=(*color, 255))
+                            else:
+                                # 分割：半透明填充 + 轮廓
+                                overlay_draw.polygon(poly, fill=(*color, 80))
+                                overlay_draw.line(poly + [poly[0]], fill=(*color, 230), width=2)
                             xs = [p[0] for p in poly]
                             ys = [p[1] for p in poly]
                             x1, y1 = min(xs), min(ys)
                         else:
                             # 检测格式：cx cy w h
-                            cx, cy, w, h = coords[0], coords[1], coords[2], coords[3]
-                            x1 = int((cx - w / 2) * W)
-                            y1 = int((cy - h / 2) * H)
-                            x2 = int((cx + w / 2) * W)
-                            y2 = int((cy + h / 2) * H)
+                            x1 = int((row['cx'] - row['w'] / 2) * W)
+                            y1 = int((row['cy'] - row['h'] / 2) * H)
+                            x2 = int((row['cx'] + row['w'] / 2) * W)
+                            y2 = int((row['cy'] + row['h'] / 2) * H)
                             draw.rectangle([x1, y1, x2, y2], outline=color, width=2)
 
                         # 类别标签

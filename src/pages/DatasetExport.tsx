@@ -81,7 +81,7 @@ export default function DatasetExport() {
     <div className="py-4 flex flex-col gap-4">
 
       {/* ── COCO JSON 导出 ── */}
-      <div className="rounded-md p-4 space-y-4" style={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))" }}>
+      <div className="rounded-xl p-4 space-y-4" style={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))" }}>
         <h2 className="font-semibold text-sm flex items-center gap-2">
           <FileJson className="w-4 h-4" />
           {t('convert.exportCoco')}

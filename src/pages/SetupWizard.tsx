@@ -78,19 +78,19 @@ export default function SetupWizard() {
 
   return (
     <div
-      className="h-screen flex flex-col items-center justify-center px-6 py-10"
+      className="h-screen overflow-y-auto px-6 py-10"
       style={{ background: "hsl(var(--background))" }}
     >
-      <div className="w-full max-w-3xl">
-        <div className="flex flex-col items-center mb-12">
-          <img src="/app-icon.svg" alt="Easy Dataset" className="w-20 h-20 mb-6" />
-          <h1 className="text-[34px] font-bold leading-none mb-3" style={{ color: "hsl(var(--foreground))" }}>
+      <div className="mx-auto w-full max-w-3xl min-h-[calc(100vh-5rem)] flex flex-col justify-center">
+        <div className="flex flex-col items-center mb-8">
+          <img src="/app-icon.svg" alt="Easy Dataset" className="w-16 h-16 mb-4" />
+          <h1 className="text-3xl font-bold leading-none mb-2" style={{ color: "hsl(var(--foreground))" }}>
             Easy Dataset
           </h1>
           <p className="text-sm leading-6" style={{ color: "hsl(var(--muted-foreground))" }}>{t('setup.firstLaunch')}</p>
         </div>
 
-        <div className="flex items-center justify-center gap-3 mb-10">
+        <div className="flex items-center justify-center gap-3 mb-8">
           {ALL_STEPS.map((s, idx) => (
             <div key={s} className="flex items-center gap-3">
               <div
@@ -117,7 +117,7 @@ export default function SetupWizard() {
         </div>
 
         <div
-          className="rounded-xl p-8 lg:p-10"
+          className="rounded-xl p-6 lg:p-8"
           style={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))" }}
         >
           {step === "mode" && (
@@ -211,7 +211,7 @@ export default function SetupWizard() {
                 </div>
               )}
               {!scanning && envs.length > 0 && (
-                <div className="space-y-3 max-h-72 overflow-y-auto pr-1">
+                <div className="space-y-3 max-h-60 overflow-y-auto pr-1">
                   {envs.map((env) => (
                     <button
                       key={env.path}
@@ -220,7 +220,10 @@ export default function SetupWizard() {
                       style={{
                         background: selected?.path === env.path ? "hsl(var(--accent))" : "hsl(var(--muted))",
                         border: "1px solid hsl(var(--border))",
-                        outline: selected?.path === env.path ? "2px solid hsl(var(--primary))" : "none",
+                        // 用 inset 阴影代替 outline：outline 画在盒子外侧，会被滚动容器左右裁掉
+                        boxShadow: selected?.path === env.path
+                          ? "inset 0 0 0 2px hsl(var(--primary))"
+                          : "none",
                       }}
                     >
                       <div className="flex items-start justify-between gap-3">

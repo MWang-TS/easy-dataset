@@ -234,7 +234,7 @@ export default function DatasetViewer() {
   const leftPanel = (
     <div className="py-4 flex flex-col gap-4">
       {/* 配置区 */}
-      <div className="rounded-md p-4" style={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", display: "flex", flexDirection: "column", gap: 24 }}>
+      <div className="rounded-xl p-4" style={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", display: "flex", flexDirection: "column", gap: 24 }}>
         {/* YAML 解析 */}
         <div>
           <label className="block text-[10px] font-semibold uppercase tracking-[0.1em]"
@@ -284,7 +284,7 @@ export default function DatasetViewer() {
       {error && <div className="text-xs px-1" style={{ color: "hsl(var(--destructive))" }}>{error}</div>}
 
       {/* 图片列表卡片：顶部内嵌类别筛选 chips */}
-      <div className="rounded-md overflow-hidden flex flex-col" style={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))" }}>
+      <div className="rounded-xl overflow-hidden flex flex-col" style={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))" }}>
 
         {/* 类别筛选 chips（加载数据后显示） */}
         {hasClassFilter && (

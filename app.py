@@ -58,6 +58,27 @@ def _start_parent_watchdog():
 
 _start_parent_watchdog()
 
+
+def _silence_child_consoles():
+    """嵌入式运行时（Tauri 拉起）下，禁止任何子进程弹出控制台窗口。
+
+    后端子进程本身已由 Rust 侧用 CREATE_NO_WINDOW 启动，但该标志不会传给
+    下一层（ffmpeg / pip / ultralytics 内部的 subprocess 等），
+    这里统一打补丁，避免用户在 GUI 里看到黑色终端窗口。
+    """
+    if os.name != 'nt':
+        return
+    if os.environ.get('EASY_DATASET_EMBEDDED', '').lower() not in {'1', 'true', 'yes'}:
+        return
+    try:
+        from services.proc import patch_popen_no_window  # noqa: PLC0415
+        patch_popen_no_window()
+    except Exception:  # noqa: BLE001 - 补丁失败不影响后端起服务
+        pass
+
+
+_silence_child_consoles()
+
 from flask import Flask, send_from_directory
 from flask_socketio import SocketIO
 from flask_cors import CORS

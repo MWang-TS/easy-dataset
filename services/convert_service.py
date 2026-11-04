@@ -14,6 +14,8 @@ try:
 except ImportError:
     ET = None
 
+from services.label_format import parse_row
+
 
 class ConvertService:
 
@@ -39,7 +41,7 @@ class ConvertService:
                     else:
                         name2id[str(v)] = int(k)
 
-            json_files = list(Path(input_dir).glob('*.json'))
+            json_files = list(Path(input_dir).rglob('*.json'))
             if not json_files:
                 return {'success': False, 'message': '未找到 JSON 文件'}
 
@@ -61,10 +63,17 @@ class ConvertService:
                         if label not in name2id:
                             continue
                         cid = name2id[label]
+                        if shape_type == 'polygon' and len(pts) >= 3:
+                            # 多边形保留为 YOLO 分割行
+                            coords = ' '.join(
+                                f'{p[0] / W:.6f} {p[1] / H:.6f}' for p in pts
+                            )
+                            lines.append(f'{cid} {coords}')
+                            continue
                         if shape_type == 'rectangle' and len(pts) == 2:
                             x1, y1 = pts[0]
                             x2, y2 = pts[1]
-                        elif shape_type in ('polygon', 'rectangle') and len(pts) >= 2:
+                        elif len(pts) >= 2:
                             xs = [p[0] for p in pts]
                             ys = [p[1] for p in pts]
                             x1, y1, x2, y2 = min(xs), min(ys), max(xs), max(ys)
@@ -109,7 +118,7 @@ class ConvertService:
                     else:
                         name2id[str(v)] = int(k)
 
-            xml_files = list(Path(input_dir).glob('*.xml'))
+            xml_files = list(Path(input_dir).rglob('*.xml'))
             if not xml_files:
                 return {'success': False, 'message': '未找到 XML 文件'}
 
@@ -189,10 +198,16 @@ class ConvertService:
                         if candidate.exists():
                             img_path = candidate
                             break
-                        # 尝试 images/ 兄弟目录
-                        sibling = tf.parent.parent / 'images' / (tf.stem + ext)
-                        if sibling.exists():
-                            img_path = sibling
+                        # 兼容 images/ 与 images/<split>/ 同级目录
+                        for sibling_dir in (
+                            tf.parent.parent / 'images',
+                            tf.parent.parent / 'images' / tf.parent.name,
+                        ):
+                            sibling = sibling_dir / (tf.stem + ext)
+                            if sibling.exists():
+                                img_path = sibling
+                                break
+                        if img_path is not None:
                             break
                     if img_path is None:
                         skipped += 1
@@ -210,15 +225,15 @@ class ConvertService:
 
                     with open(str(tf), 'r') as f:
                         for line in f:
-                            parts = line.strip().split()
-                            if len(parts) < 5:
+                            row = parse_row(line)
+                            if row is None:
                                 continue
-                            cid = int(parts[0])
-                            cx, cy, bw, bh = [float(x) for x in parts[1:5]]
-                            x1 = int((cx - bw / 2) * W)
-                            y1 = int((cy - bh / 2) * H)
-                            x2 = int((cx + bw / 2) * W)
-                            y2 = int((cy + bh / 2) * H)
+                            cid = int(row['class_id'])
+                            # 多边形/旋转框按外接框写 bndbox
+                            x1 = int((row['cx'] - row['w'] / 2) * W)
+                            y1 = int((row['cy'] - row['h'] / 2) * H)
+                            x2 = int((row['cx'] + row['w'] / 2) * W)
+                            y2 = int((row['cy'] + row['h'] / 2) * H)
                             name = id2name.get(cid, str(cid))
                             obj_elem = ET.SubElement(root_elem, 'object')
                             ET.SubElement(obj_elem, 'name').text = name
@@ -255,7 +270,7 @@ class ConvertService:
             os.makedirs(output_dir, exist_ok=True)
 
             mapping = {int(k): int(v) for k, v in class_mapping.items()}
-            txt_files = list(Path(input_dir).glob('*.txt'))
+            txt_files = list(Path(input_dir).rglob('*.txt'))
             if not txt_files:
                 return {'success': False, 'message': '未找到 TXT 文件'}
 

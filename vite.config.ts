@@ -14,6 +14,8 @@ const pkg = JSON.parse(readFileSync(path.resolve(__dirname, "package.json"), "ut
 
 export default defineConfig(async () => ({
   plugins: [react(), tailwindcss()],
+  // 相对路径资源：Tauri 自定义协议 / 子路径部署 / 直接打开 dist 都能正确加载样式与脚本
+  base: "./",
   define: {
     __APP_VERSION__: JSON.stringify(pkg.version),
   },

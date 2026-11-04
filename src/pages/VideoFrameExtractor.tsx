@@ -1,6 +1,6 @@
 /**
  * VideoFrameExtractor.tsx
- * 视频抽帧页：普通抽帧 + AI智能抽帧（YOLOv8 推理，仅保留含目标类别的帧）
+ * 视频抽帧页：普通抽帧 + AI 智能抽帧（ultralytics 模型推理，仅保留含目标类别的帧）
  */
 import { useState, useRef, useEffect } from "react";
 import { Film, FolderOpen, RefreshCw, Info, Square, Cpu } from "lucide-react";
@@ -233,7 +233,11 @@ export default function VideoFrameExtractor() {
     : null;
 
   const configPortal = (
-    <div className="py-4 flex flex-col gap-4">
+    <div className="py-4">
+      <div
+        className="rounded-xl p-4 space-y-4"
+        style={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))" }}
+      >
 
       {/* 模式切换 */}
       <div className="flex gap-1.5 p-1 rounded-lg" style={{ background: "hsl(var(--muted))" }}>
@@ -370,20 +374,21 @@ export default function VideoFrameExtractor() {
           {/* 模型路径 */}
           <div>
             <label className="block text-[10px] font-semibold uppercase tracking-[0.1em] mb-1.5"
-              style={{ color: "hsl(var(--muted-foreground))" }}>YOLOv8 模型</label>
+              style={{ color: "hsl(var(--muted-foreground))" }}>模型文件（ultralytics）</label>
             <div className="flex gap-1.5">
               <input
                 className="flex-1 px-3 py-2 rounded-md text-sm min-w-0"
                 style={{ background: "hsl(var(--muted))", border: "1px solid hsl(var(--border))", color: "hsl(var(--foreground))" }}
                 value={modelPath}
                 onChange={(e) => setModelPath(e.target.value)}
-                placeholder="yolov8m.pt 路径"
+                placeholder="best.pt / model.onnx / model.engine"
+                title="支持 ultralytics 可加载的任意权重：YOLOv5~v12 / RT-DETR，以及 .pt/.onnx/.engine/.torchscript 等"
               />
               <button
                 className="px-2.5 py-2 rounded-md flex-shrink-0 flex items-center"
                 style={{ background: "hsl(var(--muted))", border: "1px solid hsl(var(--border))" }}
                 onClick={async () => {
-                  const f = await browseFile([{ name: "YOLO 模型", extensions: ["pt"] }]);
+                  const f = await browseFile([{ name: "YOLO 模型", extensions: ["pt", "onnx", "engine", "torchscript", "tflite"] }]);
                   if (f) setModelPath(f);
                 }}
               >
@@ -565,6 +570,7 @@ export default function VideoFrameExtractor() {
           </button>
         )}
       </div>
+      </div>
     </div>
   );
 
@@ -582,7 +588,7 @@ export default function VideoFrameExtractor() {
         )}
 
         {mode === "normal" && videoInfo && (
-          <div className="rounded-md p-4 space-y-3"
+          <div className="rounded-xl p-4 space-y-3"
             style={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))" }}>
             <h3 className="text-sm font-semibold flex items-center gap-2">
               <Film className="w-4 h-4" style={{ color: "hsl(var(--primary))" }} />
@@ -608,7 +614,7 @@ export default function VideoFrameExtractor() {
 
         {/* AI 进度卡片 */}
         {mode === "ai" && loading && (
-          <div className="rounded-md p-4 space-y-3"
+          <div className="rounded-xl p-4 space-y-3"
             style={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))" }}>
             <h3 className="text-sm font-semibold flex items-center gap-2">
               <Cpu className="w-4 h-4 animate-pulse" style={{ color: "hsl(var(--primary))" }} />
@@ -663,7 +669,7 @@ export default function VideoFrameExtractor() {
         {/* 结果 */}
         {result && <ResultBox success={result.success} message={result.message} />}
         {result?.success && result.saved_count !== undefined && (
-          <div className="px-4 py-3 rounded-md text-sm"
+          <div className="px-4 py-3 rounded-lg text-sm"
             style={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))" }}>
             <span style={{ color: "hsl(var(--muted-foreground))" }}>共输出图片：</span>
             <span className="font-semibold" style={{ color: "hsl(var(--primary))" }}>

@@ -13,9 +13,24 @@ use std::os::windows::process::CommandExt;
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 
-fn apply_no_window(command: &mut std::process::Command) {
+pub fn apply_no_window(command: &mut std::process::Command) {
     #[cfg(windows)]
     command.creation_flags(CREATE_NO_WINDOW);
+}
+
+/// 结束后端进程。
+/// Windows 下用 taskkill /T 连带子进程（ffmpeg 等）一起结束，
+/// 否则子进程会残留并保留自己的控制台窗口。
+pub fn terminate_child(child: &mut std::process::Child) {
+    #[cfg(windows)]
+    {
+        let mut taskkill = std::process::Command::new("taskkill");
+        taskkill.args(["/PID", &child.id().to_string(), "/T", "/F"]);
+        apply_no_window(&mut taskkill);
+        let _ = taskkill.output();
+    }
+    let _ = child.kill();
+    let _ = child.wait();
 }
 
 pub struct BackendState(pub Mutex<Option<Child>>);
@@ -244,8 +259,7 @@ pub async fn start_backend(
 pub async fn stop_backend(state: State<'_, BackendState>) -> Result<(), String> {
     let mut guard = state.0.lock().map_err(|e| e.to_string())?;
     if let Some(mut child) = guard.take() {
-        child.kill().map_err(|e| format!("停止后端失败: {}", e))?;
-        let _ = child.wait();
+        terminate_child(&mut child);
     }
     Ok(())
 }

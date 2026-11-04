@@ -27,7 +27,7 @@ function SourceCard({
 }) {
   const { t } = useTranslation();
   return (
-    <div className="rounded-md p-4 space-y-5" style={{ background: "hsl(var(--muted) / 0.4)", border: "1px solid hsl(var(--border))" }}>
+    <div className="rounded-lg p-4 space-y-5" style={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))" }}>
       <div className="flex items-center justify-between">
         <span className="text-sm font-semibold" style={{ color: "hsl(var(--primary))" }}>{t('merge.sourceTitle', { id: src.id })}</span>
         <button
@@ -189,7 +189,7 @@ export default function DatasetMerge() {
       </div>
 
       {/* ── 输出设置 ── */}
-      <div className="rounded-md p-4 space-y-4" style={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))" }}>
+      <div className="rounded-xl p-4 space-y-4" style={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))" }}>
         <h2 className="text-sm font-semibold">{t('merge.outputSettings')}</h2>
         <MiniPathInput label={t('merge.outputImageDir')} value={outputImageDir} onChange={setOutputImageDir}
           onBrowse={async () => { const d = await browseDirectory(); if (d) setOutputImageDir(d); }} />
@@ -226,7 +226,7 @@ export default function DatasetMerge() {
       {/* ── 结果 ── */}
       {result && (
         <div
-          className="rounded-md p-4 space-y-2"
+          className="rounded-lg p-4 space-y-2"
           style={{
             background: result.success ? "hsl(var(--success) / 0.08)" : "hsl(var(--destructive) / 0.08)",
             border: `1px solid ${result.success ? "hsl(var(--success) / 0.3)" : "hsl(var(--destructive) / 0.3)"}`,

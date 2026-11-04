@@ -20,6 +20,7 @@
 |---|---|
 | 🔍 数据集质量检测 | 统计图片 / 标签 / 标注框数量，检测孤立文件、空标签、类别分布失衡 |
 | 👁 数据集可视化 | 带标注框图片预览，支持按"已标注 / 未标注"过滤 |
+| 🏷️ 图片标注 | Canvas 手工画框（检测）/ 旋转框（OBB）/ 多边形（分割），AI 自动预标注，实时写回 YOLO 标签 |
 | 🔄 格式转换 | LabelMe → YOLO、VOC → YOLO、YOLO → VOC、类别 ID 重映射 |
 | ✏️ 标签编辑 | 批量替换 / 删除类别 ID，多 ID 重排序 |
 | 📁 文件管理 | 一致性检查、删除空标签、创建空标签、批量重命名、修复损坏图片 |
@@ -28,6 +29,7 @@
 | 📦 数据集导出 | 一键打包导出为 ZIP，可选择导出子集 |
 | 🎬 视频帧提取 | 从视频中均匀 / 关键帧提取图片，直接进入标注流程 |
 | 🔁 数据增强 | 翻转、旋转、亮度 / 对比度、噪声等多种增强策略，实时预览 |
+| 🧩 环境依赖导出 | 系统管理中列出全部运行依赖（含 AI 可选），一键导出 Easy Conda 可导入的 `environment.yml` |
 
 ## 技术栈
 
@@ -110,7 +112,7 @@ pip install -r requirements.txt
 
 ### AI 智能抽帧环境（可选）
 
-AI 视频抽帧功能需要额外安装 YOLOv8 推理库和 ffmpeg。
+AI 视频抽帧功能需要额外安装 ultralytics 推理库和 ffmpeg（模型不限 YOLOv8，YOLOv5~v12 / RT-DETR / 分割 / OBB 均可）。
 
 ```bash
 conda create -n yolov8-gpu python=3.10
@@ -122,7 +124,7 @@ pip install -r requirements.txt
 # 安装 PyTorch（GPU 版本，以 CUDA 12.1 为例）
 pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
 
-# 安装 YOLOv8
+# 安装 ultralytics（模型推理）
 pip install ultralytics
 
 # 通过 conda 安装 ffmpeg（包含编解码器）
@@ -132,7 +134,7 @@ conda install -c conda-forge ffmpeg
 | 库 | 用途 |
 |---|---|
 | torch + torchvision | GPU 推理加速 |
-| ultralytics | YOLOv8 模型推理 |
+| ultralytics | 模型推理（YOLOv5~v12 / RT-DETR，检测 / 分割 / 旋转框） |
 | ffmpeg | 视频快速无损分段切割 |
 
 > **注意**：
@@ -151,6 +153,7 @@ easy_dataset/
 ├── routes/                   # Flask Blueprint 路由
 ├── services/                 # 业务逻辑层
 │   ├── dataset_service.py    # 质量检测
+│   ├── annotation_service.py # 图片标注（手工 + AI 预标注 + 导出）
 │   ├── convert_service.py    # 格式转换
 │   ├── label_service.py      # 标签编辑
 │   ├── file_service.py       # 文件管理
@@ -159,7 +162,7 @@ easy_dataset/
 │   ├── export_service.py     # 数据集导出
 │   ├── augment_service.py    # 数据增强
 │   ├── video_service.py      # 视频帧提取（普通）
-│   └── ai_video_service.py   # AI 智能抽帧（YOLOv8）
+│   └── ai_video_service.py   # AI 智能抽帧（ultralytics 模型）
 ├── src/                      # React 前端
 │   ├── pages/                # 页面组件
 │   ├── components/           # 公共组件

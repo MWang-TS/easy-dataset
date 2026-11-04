@@ -138,6 +138,31 @@ export const api = {
   previewImage: (params: { image_path: string; label_path?: string; class_names?: string[] }) =>
     apiPost("/api/dataset/preview", params),
 
+  envDependencies: (params: { include_ai?: boolean }) =>
+    apiPost<{
+      success: boolean;
+      message?: string;
+      env_name?: string;
+      python_spec?: string;
+      python_version?: string;
+      platform?: string;
+      include_ai?: boolean;
+      yaml?: string;
+      counts?: { required: number; optional: number; missing_required: number };
+      groups?: {
+        id: string;
+        title: string;
+        enabled?: boolean;
+        items: {
+          name: string;
+          spec: string;
+          installed: string;
+          required: boolean;
+          note?: string;
+        }[];
+      }[];
+    }>("/api/env/dependencies", params),
+
   convertLabelme2yolo: (params: object) => apiPost("/api/convert/labelme2yolo", params),
   convertVoc2yolo: (params: object) => apiPost("/api/convert/voc2yolo", params),
   convertYolo2voc: (params: object) => apiPost("/api/convert/yolo2voc", params),
@@ -185,4 +210,118 @@ export const api = {
     apiPost<{ success: boolean; state?: string; processed?: number; saved?: number; total_frames?: number; result?: Record<string, unknown> }>("/api/video/ai-extract-status", params),
   videoAiStopExtract: (params: { task_id: string }) =>
     apiPost("/api/video/ai-stop-extract", params),
+
+  // 图片标注
+  annotationListImages: (params: {
+    dir_path: string;
+    label_output_dir?: string;
+    image_dir?: string;
+    label_dir?: string;
+  }) =>
+    apiPost<{
+      success: boolean;
+      message?: string;
+      images?: {
+        path: string; name: string; label_path: string;
+        has_label: boolean; empty_label: boolean; box_count: number;
+      }[];
+      total?: number;
+      image_root?: string;
+      layout?: string;
+      labeled?: number;
+      unlabeled?: number;
+      label_type?: "detect" | "obb" | "segment" | "mixed" | "none";
+      rect_lines?: number;
+      polygon_lines?: number;
+    }>("/api/annotation/list-images", params),
+  annotationImage: (params: { image_path: string; max_dim?: number }) =>
+    apiPost<{
+      success: boolean;
+      message?: string;
+      data_url?: string;
+      width?: number;
+      height?: number;
+      orig_width?: number;
+      orig_height?: number;
+      scaled?: boolean;
+    }>("/api/annotation/image", params),
+  annotationReadLabel: (params: { label_path: string }) =>
+    apiPost<{
+      success: boolean;
+      message?: string;
+      exists?: boolean;
+      empty?: boolean;
+      label_path?: string;
+      boxes?: unknown[];
+    }>("/api/annotation/read-label", params),
+  annotationWriteLabel: (params: { label_path: string; boxes: unknown[] }) =>
+    apiPost<{ success: boolean; message?: string; count?: number }>("/api/annotation/write-label", params),
+  annotationScanClassIds: (params: {
+    dir_path: string;
+    label_output_dir?: string;
+    image_dir?: string;
+    label_dir?: string;
+  }) =>
+    apiPost<{ success: boolean; class_ids?: number[] }>("/api/annotation/scan-class-ids", params),
+  annotationParseClasses: (params: { class_file: string }) =>
+    apiPost<{ success: boolean; message?: string; classes?: Record<string, string>; count?: number }>(
+      "/api/annotation/parse-classes", params
+    ),
+  annotationDetectClasses: (params: { dir_path: string }) =>
+    apiPost<{ success: boolean; message?: string; class_file?: string; classes?: Record<string, string>; count?: number }>(
+      "/api/annotation/detect-classes", params
+    ),
+  annotationWriteClasses: (params: { target_dir: string; class_names: Record<string, string> }) =>
+    apiPost<{ success: boolean; message?: string; class_file?: string; count?: number }>(
+      "/api/annotation/write-classes", params
+    ),
+  annotationAutoLabelCheck: () =>
+    apiPost<{ available: boolean; version?: string; message?: string; default_model?: string; model_exists?: boolean }>(
+      "/api/annotation/auto-label-check", {}
+    ),
+  annotationAutoLabel: (params: {
+    dir_path: string;
+    model_path: string;
+    conf?: number;
+    output_dir?: string;
+    overwrite?: boolean;
+    image_dir?: string;
+  }) => apiPost<{ success: boolean; task_id?: string; message?: string }>("/api/annotation/auto-label", params),
+  annotationAutoLabelStatus: (params: { task_id: string }) =>
+    apiPost<{
+      success: boolean;
+      message?: string;
+      state?: string;
+      total?: number;
+      processed?: number;
+      labeled?: number;
+      skipped?: number;
+      current?: string;
+      errors?: string[];
+    }>("/api/annotation/auto-label-status", params),
+  annotationAutoLabelStop: (params: { task_id: string }) =>
+    apiPost<{ success: boolean; message?: string }>("/api/annotation/auto-label-stop", params),
+  annotationExport: (params: {
+    source_dir: string;
+    target_parent: string;
+    export_mode: "raw" | "detect" | "segment";
+    include_images?: boolean;
+    class_names?: Record<string, string>;
+    train_ratio?: number;
+    seed?: number;
+    label_output_dir?: string;
+    image_dir?: string;
+    label_dir?: string;
+    export_format?: "yolo" | "coco" | "voc" | "labelme";
+  }) =>
+    apiPost<{
+      success: boolean;
+      message?: string;
+      output_dir?: string;
+      image_count?: number;
+      label_count?: number;
+      total_images?: number;
+      class_count?: number;
+      warnings?: string[];
+    }>("/api/annotation/export", params),
 };

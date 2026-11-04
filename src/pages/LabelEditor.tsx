@@ -89,7 +89,7 @@ export default function LabelEditor() {
         ))}
       </div>
 
-      <div className="rounded-md p-4 space-y-4" style={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))" }}>
+      <div className="rounded-xl p-4 space-y-4" style={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))" }}>
         {/* 标签目录 */}
         <div>
           <label className="block text-[10px] font-semibold uppercase tracking-[0.1em] mb-1.5" style={{ color: "hsl(var(--muted-foreground))" }}>{t('labels.labelDir')}</label>

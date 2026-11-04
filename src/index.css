@@ -1,7 +1,14 @@
 @import "tailwindcss";
 
+/* 显式声明扫描范围：不依赖自动探测（不同平台/CI 下工作目录、.git 状态不同，
+   自动探测失败会导致生产包丢样式）。路径相对于本文件。 */
+@source "../index.html";
+@source "./**/*.{ts,tsx}";
+
 @layer base {
   :root {
+    /* 原生控件（滚动条 / 表单 / 下拉）跟随主题，避免各平台白底控件 */
+    color-scheme: dark;
     --background: 240 4% 12%;
     --foreground: 0 0% 86%;
     --primary: 207 100% 42%;
@@ -25,6 +32,7 @@
 
   /* 亮色模式 */
   html.light {
+    color-scheme: light;
     --background: 0 0% 97%;
     --foreground: 240 10% 15%;
     --primary: 207 100% 38%;
@@ -54,7 +62,7 @@
 
   body {
     min-height: 100vh;
-    background: #1e1e1e;
+    background: hsl(var(--background));
     color: hsl(var(--foreground));
     /* 跨平台字体栈：Windows 用 Segoe UI，macOS 用 SF/PingFang，
        Linux 落到 Noto Sans CJK，避免打包后在非 Windows 上中英文糊成一片 */
@@ -134,7 +142,7 @@ select:focus {
 
 #root {
   min-height: 100vh;
-  background: #1e1e1e;
+  background: hsl(var(--background));
 }
 
 ::selection {
@@ -142,6 +150,7 @@ select:focus {
   color: hsl(var(--foreground));
 }
 
+/* Scrollbar styling */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
@@ -154,5 +163,22 @@ select:focus {
   border-radius: 3px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: hsl(var(--muted-foreground));
+  background: hsl(var(--muted-foreground) / 0.5);
+}
+
+/* 状态栏提示走马灯：仅用 transform（合成层动画），不逐帧触发布局 */
+@keyframes eds-ticker {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}
+
+/* 窗口失焦 / 页面隐藏时暂停所有 CSS 动画，避免后台空转重绘 */
+.app-inactive *,
+.app-inactive *::before,
+.app-inactive *::after {
+  animation-play-state: paused !important;
 }

@@ -25,5 +25,8 @@ export const DOWNLOAD_PAGE_URL = "https://eds.tsagent.cc/index.html";
 /** 出品方。 */
 export const STUDIO_URL = "https://tsagent.cc/";
 
+/** Easy Conda（环境管理器，可导入本项目导出的 environment.yml）。 */
+export const EASY_CONDA_URL = "https://easyconda.tsagent.cc/";
+
 /** 联系邮箱（关于面板里的「联系作者」）。 */
-export const CONTACT_EMAIL = "gawain@tsagent.cc";
+export const CONTACT_EMAIL = "support@tsagent.cc";

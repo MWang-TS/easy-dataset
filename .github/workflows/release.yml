@@ -72,7 +72,18 @@ jobs:
           releaseBody: |
             ### Easy Dataset ${{ github.ref_name }}
 
-            安装包见下方 **Assets**：
+            > 本次为 **Pre-release**，安装包见下方 **Assets**，欢迎试用并反馈。
+
+            #### v1.0.0 主要更新
+
+            - **标注模块**：支持目标检测 / 旋转框（OBB）/ 实例分割三种类型，选定后同工作内锁定；
+              旋转框按「矩形 + 角度」建模（拖框顶手柄旋转、角点缩放、角度输入），导出 8 坐标
+            - 标注画布拆为底图 + 矢量叠加层，放大后框线/多边形保持锐利；支持 `Ctrl+C` / `Ctrl+V` 复制粘贴标注
+            - 数据质量、可视化预览、数据增强、COCO / VOC / LabelMe 转换全面支持多边形与旋转框
+            - 修复导出时从第 2 张图起丢标签、质量统计把多边形坐标当宽高的问题
+            - AI 自动标注 / 智能抽帧不再限定 YOLOv8：支持 ultralytics 各版本、分割与 OBB 模型及 onnx/engine 导出
+            - 客户端运行不再弹出后端 / ffmpeg 控制台窗口（进程树随应用退出）
+            - 系统管理新增「环境依赖」页签，可导出 Easy Conda 可导入的 `environment.yml`
 
             | 平台 | 文件 |
             |---|---|
@@ -84,4 +95,5 @@ jobs:
 
             > 打赏完全自愿，不影响任何功能使用。
           releaseDraft: false
-          prerelease: false
+          # v1.0.0 以预发布形式发布；正式版请改回 false
+          prerelease: true

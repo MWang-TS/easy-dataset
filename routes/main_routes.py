@@ -23,6 +23,8 @@ from services.merge_service import MergeService
 from services.augment_service import AugmentService
 from services.video_service import VideoService
 from services.ai_video_service import AIVideoService, DEFAULT_MODEL_PATH
+from services.annotation_service import AnnotationService
+from services.env_service import EnvService
 
 
 # ────────────────── 可选鉴权 ──────────────────
@@ -58,6 +60,17 @@ def _enforce_auth():
     if _is_token_valid(_get_request_token()):
         return None
     return jsonify({'success': False, 'message': 'Unauthorized'}), 401
+
+
+# ────────────────── 环境依赖 / EasyConda 导出 ──────────────────
+
+@main_bp.route('/api/env/dependencies', methods=['GET', 'POST'])
+def env_dependencies():
+    """客户端运行环境依赖清单 + EasyConda 可用的 environment.yml"""
+    data = request.get_json(silent=True) or {}
+    include_ai = bool(data.get('include_ai', True))
+    result = EnvService.dependencies(include_ai=include_ai)
+    return jsonify(result)
 
 
 # ────────────────── 数据集质量检测 ──────────────────
@@ -447,6 +460,152 @@ def video_ai_stop_extract():
     """中止 AI 抽帧任务"""
     data = request.get_json(force=True)
     result = AIVideoService.stop_extraction(task_id=data.get('task_id', ''))
+    return jsonify(result)
+
+
+# ────────────────── 图片标注 ──────────────────
+
+@main_bp.route('/api/annotation/list-images', methods=['POST'])
+def annotation_list_images():
+    """列出标注文件夹内图片（自动探测 images/ + labels/ 结构）"""
+    data = request.get_json(force=True) or {}
+    result = AnnotationService.list_images(
+        dir_path=data.get('dir_path', ''),
+        label_output_dir=data.get('label_output_dir', ''),
+        image_dir=data.get('image_dir', ''),
+        label_dir=data.get('label_dir', ''),
+    )
+    return jsonify(result)
+
+
+@main_bp.route('/api/annotation/image', methods=['POST'])
+def annotation_image():
+    """读取图片并返回 base64 data URL（长边超过 max_dim 时等比缩小）"""
+    data = request.get_json(force=True) or {}
+    result = AnnotationService.read_image(
+        image_path=data.get('image_path', ''),
+        max_dim=int(data.get('max_dim', 2560)),
+    )
+    return jsonify(result)
+
+
+@main_bp.route('/api/annotation/read-label', methods=['POST'])
+def annotation_read_label():
+    """读取 YOLO 标注文件"""
+    data = request.get_json(force=True) or {}
+    result = AnnotationService.read_label(label_path=data.get('label_path', ''))
+    return jsonify(result)
+
+
+@main_bp.route('/api/annotation/write-label', methods=['POST'])
+def annotation_write_label():
+    """覆盖写入 YOLO 标注文件（空列表 → 空文件）"""
+    data = request.get_json(force=True) or {}
+    result = AnnotationService.write_label(
+        label_path=data.get('label_path', ''),
+        boxes=data.get('boxes', []),
+    )
+    return jsonify(result)
+
+
+@main_bp.route('/api/annotation/scan-class-ids', methods=['POST'])
+def annotation_scan_class_ids():
+    """扫描已有标注出现过的 class_id"""
+    data = request.get_json(force=True) or {}
+    result = AnnotationService.scan_class_ids(
+        dir_path=data.get('dir_path', ''),
+        label_output_dir=data.get('label_output_dir', ''),
+        image_dir=data.get('image_dir', ''),
+        label_dir=data.get('label_dir', ''),
+    )
+    return jsonify(result)
+
+
+@main_bp.route('/api/annotation/parse-classes', methods=['POST'])
+def annotation_parse_classes():
+    """解析 classes.txt / data.yaml 的类别定义"""
+    data = request.get_json(force=True) or {}
+    result = AnnotationService.parse_class_file(class_file=data.get('class_file', ''))
+    return jsonify(result)
+
+
+@main_bp.route('/api/annotation/detect-classes', methods=['POST'])
+def annotation_detect_classes():
+    """在目录及上级目录里自动寻找 data.yaml / dataset.yaml 并解析类别名"""
+    data = request.get_json(force=True) or {}
+    result = AnnotationService.detect_class_file(dir_path=data.get('dir_path', ''))
+    return jsonify(result)
+
+
+@main_bp.route('/api/annotation/write-classes', methods=['POST'])
+def annotation_write_classes():
+    """把类别名写入指定目录下的 classes.txt（关闭工作 / 导出前落盘）"""
+    data = request.get_json(force=True) or {}
+    result = AnnotationService.write_classes(
+        target_dir=data.get('target_dir', ''),
+        class_names=data.get('class_names') or {},
+    )
+    return jsonify(result)
+
+
+@main_bp.route('/api/annotation/auto-label-check', methods=['POST', 'GET'])
+def annotation_auto_label_check():
+    """检查自动标注环境（ultralytics 是否可用）"""
+    result = AnnotationService.check_auto_label()
+    return jsonify(result)
+
+
+@main_bp.route('/api/annotation/auto-label', methods=['POST'])
+def annotation_auto_label():
+    """启动 AI 自动预标注任务，立即返回 task_id"""
+    data = request.get_json(force=True) or {}
+    result = AnnotationService.start_auto_label(
+        dir_path=data.get('dir_path', ''),
+        model_path=data.get('model_path', ''),
+        conf=float(data.get('conf', 0.25)),
+        output_dir=data.get('output_dir', ''),
+        overwrite=bool(data.get('overwrite', False)),
+        image_dir=data.get('image_dir', ''),
+    )
+    return jsonify(result)
+
+
+@main_bp.route('/api/annotation/auto-label-status', methods=['POST'])
+def annotation_auto_label_status():
+    """查询自动标注任务进度"""
+    data = request.get_json(force=True) or {}
+    result = AnnotationService.auto_label_status(task_id=data.get('task_id', ''))
+    return jsonify(result)
+
+
+@main_bp.route('/api/annotation/auto-label-stop', methods=['POST'])
+def annotation_auto_label_stop():
+    """中止自动标注任务"""
+    data = request.get_json(force=True) or {}
+    result = AnnotationService.stop_auto_label(task_id=data.get('task_id', ''))
+    return jsonify(result)
+
+
+@main_bp.route('/api/annotation/export', methods=['POST'])
+def annotation_export():
+    """导出标注数据集（raw / detect / segment）"""
+    data = request.get_json(force=True) or {}
+    try:
+        result = AnnotationService.export_dataset(
+            source_dir=data.get('source_dir', ''),
+            target_parent=data.get('target_parent', ''),
+            export_mode=data.get('export_mode', 'detect'),
+            include_images=bool(data.get('include_images', True)),
+            class_names=data.get('class_names') or {},
+            train_ratio=float(data.get('train_ratio', 0.8)),
+            seed=int(data.get('seed', 42)),
+            label_output_dir=data.get('label_output_dir', ''),
+            image_dir=data.get('image_dir', ''),
+            label_dir=data.get('label_dir', ''),
+            export_format=data.get('export_format', 'yolo'),
+        )
+    except Exception as e:  # noqa: BLE001 - 保证前端总能拿到 JSON
+        return jsonify({'success': False, 'message': str(e)})
     return jsonify(result)
 
 

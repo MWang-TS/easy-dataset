@@ -95,7 +95,7 @@ export default function FileManager() {
       </div>
 
       {/* 参数 */}
-      <div className="rounded-md p-4 space-y-4" style={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))" }}>
+      <div className="rounded-xl p-4 space-y-4" style={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))" }}>
         {needsImageDir && <DirInput label={t('common.imageDir')} value={imageDir} onChange={setImageDir} />}
         {needsLabelDir && <DirInput label={t('common.labelDir')} value={labelDir} onChange={setLabelDir} />}
 
@@ -155,7 +155,7 @@ export default function FileManager() {
                   [t('files.orphanImages'), result.orphan_images],
                   [t('files.orphanLabels'), result.orphan_labels],
                 ].map(([k, v]) => (
-                  <div key={String(k)} className="rounded-md p-3 flex justify-between text-sm"
+                  <div key={String(k)} className="rounded-lg p-3 flex justify-between text-sm"
                     style={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))" }}>
                     <span style={{ color: "hsl(var(--muted-foreground))" }}>{String(k)}</span>
                     <span className="font-bold">{String(v)}</span>
@@ -174,7 +174,7 @@ export default function FileManager() {
           )}
           {/* 批量重命名预览表格 */}
           {tool === "rename" && result.success && (result.preview as RenameItem[])?.length > 0 && (
-            <div className="rounded-md overflow-hidden" style={{ border: "1px solid hsl(var(--border))" }}>
+            <div className="rounded-lg overflow-hidden" style={{ border: "1px solid hsl(var(--border))" }}>
               <div className="px-3 py-2 text-xs font-semibold"
                 style={{ background: "hsl(var(--muted))", color: "hsl(var(--muted-foreground))" }}>
                 {t('files.renamePreview', { count: (result.preview as RenameItem[]).length })}
@@ -222,7 +222,7 @@ interface RenameItem { old_image: string; new_image: string; old_stem: string; n
 
 function PathList({ title, paths }: { title: string; paths: string[] }) {
   return (
-    <div className="rounded-md overflow-hidden" style={{ border: "1px solid hsl(var(--border))" }}>
+    <div className="rounded-lg overflow-hidden" style={{ border: "1px solid hsl(var(--border))" }}>
       <div className="px-3 py-2 text-xs font-semibold"
         style={{ background: "hsl(var(--muted))", color: "hsl(var(--muted-foreground))" }}>{title}</div>
       <div className="max-h-36 overflow-y-auto">

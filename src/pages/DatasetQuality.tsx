@@ -28,7 +28,7 @@ function Panel({
 }) {
   return (
     <section
-      className="rounded-md p-4 lg:p-5"
+      className="rounded-xl p-4 lg:p-5"
       style={{
         background: "hsl(var(--card))",
         border: "1px solid hsl(var(--border))",
@@ -82,7 +82,7 @@ function StatCard({
 
   return (
     <div
-      className="rounded-md p-4"
+      className="rounded-lg p-4"
       style={{
         background: `linear-gradient(180deg, ${currentTone.glow}, rgba(255, 255, 255, 0.01))`,
         border: "1px solid hsl(var(--border))",
@@ -138,7 +138,7 @@ function FileList({ title, paths }: { title: string; paths: string[] }) {
         {title}（{paths.length} {t('common.items')}）
       </div>
       <div
-        className="rounded-md p-3 max-h-32 overflow-y-auto"
+        className="rounded-lg p-3 max-h-32 overflow-y-auto"
         style={{ background: "rgba(255, 255, 255, 0.03)", border: "1px solid hsl(var(--border) / 0.75)" }}
       >
         {paths.map((p) => (
@@ -428,7 +428,7 @@ export default function DatasetQuality() {
         {!result && !loading && (
           <Panel title={t('quality.waitTitle')} tooltip={t('quality.waitTooltip')}>
             <div
-              className="rounded-md min-h-[320px] flex flex-col items-center justify-center text-center px-6"
+              className="rounded-lg min-h-[320px] flex flex-col items-center justify-center text-center px-6"
               style={{
                 background: "hsl(var(--muted))",
                 border: "1px dashed hsl(var(--border))",
@@ -446,7 +446,7 @@ export default function DatasetQuality() {
 
         {loading && (
           <Panel title={t('quality.analyzingTitle')} tooltip={t('quality.analyzingTooltip')}>
-            <div className="rounded-md min-h-[220px] flex flex-col items-center justify-center"
+            <div className="rounded-lg min-h-[220px] flex flex-col items-center justify-center"
               style={{ background: "hsl(var(--muted))", border: "1px solid hsl(var(--border))" }}>
               <RefreshCw className="w-8 h-8 animate-spin" style={{ color: "hsl(var(--primary))" }} />
               <div className="mt-4 text-base font-medium">{t('quality.analyzingHint')}</div>
@@ -483,6 +483,21 @@ export default function DatasetQuality() {
                 <StatCard label={t('quality.totalLabels')} value={result.summary.total_labels} />
                 <StatCard label={t('quality.totalBoxes')} value={result.summary.total_boxes} />
                 <StatCard label={t('quality.numClasses')} value={result.summary.num_classes} />
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3 mt-3">
+                <StatCard
+                  label={t('annotation.labelType')}
+                  value={
+                    result.summary.label_type === 'detect' ? t('annotation.typeDetect')
+                      : result.summary.label_type === 'obb' ? t('annotation.typeObb')
+                        : result.summary.label_type === 'segment' ? t('annotation.typeSegment')
+                          : result.summary.label_type === 'mixed' ? t('annotation.typeMixed')
+                            : t('annotation.typeNone')
+                  }
+                />
+                <StatCard label={t('quality.rectRows')} value={result.summary.rect_rows ?? 0} />
+                <StatCard label={t('quality.polygonRows')} value={result.summary.polygon_rows ?? 0} />
+                <StatCard label={t('quality.obbRows')} value={result.summary.obb_rows ?? 0} />
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3 mt-3">
                 <StatCard label={t('quality.matchedPairs')} value={result.summary.matched_pairs} tone="success" />

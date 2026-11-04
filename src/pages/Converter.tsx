@@ -97,7 +97,7 @@ export default function Converter() {
       </div>
 
       {/* 参数表单 */}
-      <div className="rounded-md p-4 space-y-4" style={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))" }}>
+      <div className="rounded-xl p-4 space-y-4" style={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))" }}>
         {mode === "yolo2voc" ? (
           <DirInput label={t('convert.yoloDirLabel')} value={datasetDir} onChange={setDatasetDir} />
         ) : mode === "yolo2coco" ? (

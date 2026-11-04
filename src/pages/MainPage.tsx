@@ -4,7 +4,8 @@ import {
   Settings, Play, Square, Cpu, CircleHelp,
   GitMerge, Film, Minus, Maximize2, X as XIcon,
   Coffee, Sun, Moon, Globe, Check, ArrowDownToLine,
-  Github, Mail, ExternalLink, Copyright,
+  Github, Mail, ExternalLink, Copyright, PenTool, Server,
+  ChevronsLeft, ChevronsRight, Package, Download,
 } from "lucide-react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { confirm } from "@tauri-apps/plugin-dialog";
@@ -12,18 +13,20 @@ import { cn } from "@/lib/utils";
 import { DEFAULT_BACKEND_PORT, useAppStore } from "@/lib/store";
 import { useTranslation } from "react-i18next";
 import { setLocale, LOCALE_LABELS, type Locale } from "@/i18n/index";
-import { startBackend, stopBackend, checkBackendAlive, listCondaEnvs, getAppDir, type CondaEnv } from "@/lib/tauri-bridge";
+import { startBackend, stopBackend, checkBackendAlive, listCondaEnvs, getAppDir, type CondaEnv, api, browseSaveFile, writeTextFile } from "@/lib/tauri-bridge";
 import { checkForUpdates, type UpdateInfo } from "@/lib/update";
 import { APP_VERSION } from "@/lib/version";
-import { CONTACT_EMAIL, PRODUCT_HOME_URL, REPO_URL, STUDIO_URL } from "@/lib/links";
+import { CONTACT_EMAIL, EASY_CONDA_URL, PRODUCT_HOME_URL, REPO_URL, STUDIO_URL } from "@/lib/links";
 import { openExternal } from "@/lib/open-external";
 import { SidebarPortalCtx } from "@/lib/sidebar-context";
 import TipDialog from "@/components/TipDialog";
 import UpdateDialog from "@/components/UpdateDialog";
+import StatusTipMarquee from "@/components/StatusTipMarquee";
 
 // ── 页面组件（懒加载占位，正式实现在各自文件中）──
 import DatasetQuality from "./DatasetQuality";
 import DatasetViewer from "./DatasetViewer";
+import Annotation from "./Annotation";
 import Converter from "./Converter";
 import LabelEditor from "./LabelEditor";
 import FileManager from "./FileManager";
@@ -31,31 +34,55 @@ import DatasetSplit from "./DatasetSplit";
 import DatasetMerge from "./DatasetMerge";
 import VideoFrameExtractor from "./VideoFrameExtractor";
 
-type PageId = "quality" | "viewer" | "convert" | "labels" | "files" | "split" | "merge" | "video";
+type PageId = "quality" | "viewer" | "annotation" | "convert" | "labels" | "files" | "split" | "merge" | "video";
 
 const NAV_ICONS: Record<PageId, React.FC<{ className?: string }>> = {
-  quality: BarChart2, viewer: Eye, convert: RefreshCw, labels: Layers,
+  quality: BarChart2, viewer: Eye, annotation: PenTool, convert: RefreshCw, labels: Layers,
   files: FolderCog, split: Scissors, merge: GitMerge, video: Film,
 };
 
-const PAGE_IDS: PageId[] = ["quality", "viewer", "convert", "labels", "files", "split", "merge", "video"];
+const PAGE_IDS: PageId[] = ["quality", "viewer", "annotation", "convert", "labels", "files", "split", "merge", "video"];
 
 function ActivityRail({
   activePage,
   onNavigate,
+  collapsed,
+  onToggleSidebar,
 }: {
   activePage: PageId;
   onNavigate: (page: PageId) => void;
+  collapsed: boolean;
+  onToggleSidebar: () => void;
 }) {
   const { t } = useTranslation();
+  const [railHovered, setRailHovered] = useState(false);
+  const hintExpand = collapsed && railHovered;
   return (
     <aside
       className="w-12 flex-shrink-0 flex flex-col items-center py-2"
+      onMouseEnter={() => setRailHovered(true)}
+      onMouseLeave={() => setRailHovered(false)}
       style={{
         background: "hsl(var(--sidebar))",
         borderRight: "1px solid hsl(var(--border))",
       }}
     >
+      {/* 顶部：折叠 / 展开配置侧边栏（与侧边栏标题行齐平） */}
+      <div className="pb-1.5">
+        <button
+          onClick={onToggleSidebar}
+          className={cn(
+            "w-9 h-9 rounded-md flex items-center justify-center transition-colors"
+          )}
+          style={{
+            color: hintExpand ? "hsl(var(--primary))" : "hsl(var(--muted-foreground))",
+            background: hintExpand ? "hsl(var(--primary) / 0.15)" : "transparent",
+          }}
+          title={`${collapsed ? t('common.expandSidebar') : t('common.collapseSidebar')} (Ctrl+B)`}
+        >
+          {collapsed ? <ChevronsRight className="w-4 h-4" /> : <ChevronsLeft className="w-4 h-4" />}
+        </button>
+      </div>
       <div className="flex flex-col w-full items-center">
         {PAGE_IDS.map((id) => {
           const Icon = NAV_ICONS[id];
@@ -103,6 +130,9 @@ export default function MainPage() {
   const [langOpen, setLangOpen] = useState(false);
   const handleSetLocale = (locale: Locale) => { setLocale(locale); setLangOpen(false); };
 
+  // ── 标题栏后端状态弹出层 ──
+  const [backendOpen, setBackendOpen] = useState(false);
+
   // ── 检查更新弹窗 ──
   const [checking, setChecking] = useState(false);
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
@@ -111,7 +141,57 @@ export default function MainPage() {
 
   // ── 系统设置弹窗 ──
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [settingsTab, setSettingsTab] = useState<'env' | 'about'>('env');
+  const [settingsTab, setSettingsTab] = useState<'env' | 'deps' | 'about'>('env');
+
+  // ── 环境依赖（系统管理弹窗·环境依赖页签）──
+  type EnvDeps = Awaited<ReturnType<typeof api.envDependencies>>;
+  const [deps, setDeps] = useState<EnvDeps | null>(null);
+  const [depsLoading, setDepsLoading] = useState(false);
+  const [depsError, setDepsError] = useState<string | null>(null);
+  const [depsIncludeAI, setDepsIncludeAI] = useState(true);
+  const [depsExported, setDepsExported] = useState<string | null>(null);
+
+  const loadDeps = useCallback(async (includeAI: boolean) => {
+    setDepsLoading(true);
+    setDepsError(null);
+    setDepsExported(null);
+    try {
+      const res = await api.envDependencies({ include_ai: includeAI });
+      if (!res.success) {
+        setDeps(null);
+        setDepsError(res.message || t('settings.depsLoadFailed'));
+        return;
+      }
+      setDeps(res);
+    } catch (e) {
+      setDeps(null);
+      setDepsError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setDepsLoading(false);
+    }
+  }, [t]);
+
+  useEffect(() => {
+    if (!settingsOpen || settingsTab !== 'deps') return;
+    void loadDeps(depsIncludeAI);
+  }, [settingsOpen, settingsTab, depsIncludeAI, loadDeps]);
+
+  const handleExportEnvYaml = useCallback(async () => {
+    if (!deps?.yaml) return;
+    setDepsError(null);
+    try {
+      const target = await browseSaveFile(
+        [{ name: 'Conda Environment', extensions: ['yml', 'yaml'] }],
+        'environment.yml',
+      );
+      if (!target) return;
+      await writeTextFile(target, deps.yaml);
+      setDepsExported(target);
+    } catch (e) {
+      setDepsError(e instanceof Error ? e.message : String(e));
+    }
+  }, [deps]);
+
   // 版本号唯一真相源：package.json（构建期注入），不再异步向 Tauri 讨要
   const appVersion = APP_VERSION;
 
@@ -125,6 +205,24 @@ export default function MainPage() {
     }, 5000);
     return () => clearTimeout(timer);
   }, [appVersion]);
+
+  // 窗口失焦 / 页面隐藏时暂停所有 CSS 动画，避免 WebView2 后台空转重绘（GPU 占用高）
+  useEffect(() => {
+    const root = document.documentElement;
+    const sync = () => {
+      root.classList.toggle("app-inactive", document.hidden || !document.hasFocus());
+    };
+    document.addEventListener("visibilitychange", sync);
+    window.addEventListener("blur", sync);
+    window.addEventListener("focus", sync);
+    sync();
+    return () => {
+      document.removeEventListener("visibilitychange", sync);
+      window.removeEventListener("blur", sync);
+      window.removeEventListener("focus", sync);
+      root.classList.remove("app-inactive");
+    };
+  }, []);
 
   const handleCheckUpdate = useCallback(async () => {
     setChecking(true);
@@ -161,9 +259,28 @@ export default function MainPage() {
 
   // ── 侧边栏宽度拖拽 ──
   const [sidebarWidth, setSidebarWidth] = useState(380);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(
+    () => localStorage.getItem('easy-dataset:sidebar-collapsed') === '1'
+  );
   const isResizing = useRef(false);
   const resizeStartX = useRef(0);
   const resizeStartW = useRef(0);
+
+  // 折叠状态持久化 + Ctrl/Cmd+B 快捷键
+  useEffect(() => {
+    localStorage.setItem('easy-dataset:sidebar-collapsed', sidebarCollapsed ? '1' : '0');
+  }, [sidebarCollapsed]);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'b') {
+        e.preventDefault();
+        setSidebarCollapsed((v) => !v);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
 
   const handleResizeMouseDown = useCallback((e: React.MouseEvent) => {
     isResizing.current = true;
@@ -266,6 +383,7 @@ export default function MainPage() {
   const pages: Record<PageId, React.ReactNode> = {
     quality: <DatasetQuality />,
     viewer: <DatasetViewer />,
+    annotation: <Annotation />,
     convert: <Converter />,
     labels: <LabelEditor />,
     files: <FileManager />,
@@ -289,20 +407,15 @@ export default function MainPage() {
   const statusText = t(`backend.${backendStatus === "stopped" ? "disconnected" : backendStatus === "starting" ? "connecting" : backendStatus === "running" ? "connected" : "disconnected"}`);
 
   return (
-    <div className="h-screen overflow-hidden flex flex-col" style={{ background: "hsl(var(--editor))" }}>
+    <div className="h-screen overflow-hidden flex flex-col" style={{ background: "hsl(var(--background))" }}>
       {/* ── 全宽标题栏 ── */}
       <header
         className="h-11 flex items-center gap-2.5 flex-shrink-0"
         data-tauri-drag-region
-        style={{ background: "hsl(var(--card))", borderBottom: "1px solid hsl(var(--border))", paddingLeft: 32, paddingRight: 0 }}
+        style={{ background: "transparent", paddingLeft: 19, paddingRight: 0 }}
       >
-        <div
-          className="w-5 h-5 rounded flex items-center justify-center flex-shrink-0"
-          style={{ background: "hsl(var(--primary))" }}
-        >
-          <Cpu className="w-3 h-3" style={{ color: "white" }} />
-        </div>
-        <span className="text-xs" style={{ color: "hsl(var(--muted-foreground))" }}>Easy Dataset</span>
+        <img src="/app-icon.svg" alt="Easy Dataset" className="w-7 h-7 rounded flex-shrink-0" />
+        <span className="text-xs font-semibold" style={{ color: "hsl(var(--foreground))" }}>Easy Dataset</span>
         <span
           className="text-[10px] px-1.5 py-0.5 rounded font-medium flex-shrink-0"
           style={{
@@ -317,7 +430,7 @@ export default function MainPage() {
         {updateInfo?.has_update && (
           <button
             onClick={() => setUpdateOpen(true)}
-            className="text-xs px-1.5 py-0.5 rounded font-medium animate-pulse"
+            className="text-xs px-1.5 py-0.5 rounded font-medium"
             style={{ background: 'rgba(34,197,94,0.15)', color: '#22c55e', border: '1px solid rgba(34,197,94,0.3)' }}
             title={t('update.newVersion', { version: `v${updateInfo.latest_version}` })}
           >
@@ -326,6 +439,57 @@ export default function MainPage() {
         )}
         <div className="flex-1" />
         <div className="flex items-center ml-2 gap-0.5">
+          {/* 后端状态：小图标 + 状态点，点击弹出启停控制 */}
+          <div className="relative">
+            <button
+              onClick={() => setBackendOpen(v => !v)}
+              className="relative w-8 h-7 flex items-center justify-center rounded"
+              style={{ color: 'hsl(var(--muted-foreground))' }}
+              title={statusText}
+            >
+              <Server className="w-3.5 h-3.5" />
+              <span
+                className="absolute right-1 bottom-0.5 w-1.5 h-1.5 rounded-full"
+                style={{ background: statusColor, boxShadow: '0 0 0 2px hsl(var(--card))' }}
+              />
+            </button>
+            {backendOpen && (
+              <>
+                <div className="fixed inset-0 z-40" onClick={() => setBackendOpen(false)} />
+                <div
+                  className="absolute right-0 top-full mt-1 rounded-lg z-50 shadow-lg p-3"
+                  style={{ background: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', minWidth: 220 }}
+                >
+                  <div className="flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: statusColor }} />
+                    <span className="text-xs font-medium">{statusText}</span>
+                  </div>
+                  <div className="mt-1.5 text-[11px] leading-5" style={{ color: 'hsl(var(--muted-foreground))' }}>
+                    {backendStatus === 'error' ? backendMessage || t('backend.errorHint') : t('backend.hint')}
+                  </div>
+                  {backendStatus === 'running' ? (
+                    <button
+                      onClick={() => { setBackendOpen(false); handleStopBackend(); }}
+                      className="mt-2 w-full flex items-center justify-center gap-1.5 h-7 rounded-md text-xs"
+                      style={{ background: 'rgba(197, 15, 31, 0.12)', color: 'hsl(var(--destructive))', border: '1px solid rgba(197, 15, 31, 0.24)' }}
+                    >
+                      <Square className="w-3 h-3" />
+                      {t('backend.stop')}
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => { setBackendOpen(false); handleStartBackend(); }}
+                      className="mt-2 w-full flex items-center justify-center gap-1.5 h-7 rounded-md text-xs"
+                      style={{ background: 'hsl(var(--primary))', color: 'white' }}
+                    >
+                      <Play className="w-3 h-3" />
+                      {t('backend.start')}
+                    </button>
+                  )}
+                </div>
+              </>
+            )}
+          </div>
           <button
             onClick={toggleTheme}
             className="w-8 h-7 flex items-center justify-center rounded"
@@ -430,14 +594,26 @@ export default function MainPage() {
           </button>
         </div>
       </header>
-      {/* ── 标题栏以下：侧边栏 + 内容区 ── */}
-      <div className="flex flex-1 min-h-0 overflow-hidden">
-        <div className="flex flex-shrink-0 min-h-0 overflow-hidden">
-          <ActivityRail activePage={activePage as PageId} onNavigate={(page) => setActivePage(page)} />
+      {/* ── 标题栏以下：侧边栏 + 内容区（内嵌圆角面板） ── */}
+      <div className="flex flex-1 min-h-0 overflow-hidden" style={{ padding: 8, gap: 6 }}>
+        <div
+          className="flex flex-shrink-0 min-h-0 overflow-hidden rounded-xl"
+          style={{ border: "1px solid hsl(var(--border))" }}
+        >
+          <ActivityRail
+            activePage={activePage as PageId}
+            onNavigate={(page) => setActivePage(page)}
+            collapsed={sidebarCollapsed}
+            onToggleSidebar={() => setSidebarCollapsed(v => !v)}
+          />
           {/* ── Config sidebar ── */}
           <aside
-            className="flex-shrink-0 flex flex-col"
-            style={{ width: sidebarWidth, background: "hsl(var(--sidebar))" }}
+            className="flex-shrink-0 flex-col"
+            style={{
+              width: sidebarWidth,
+              background: "hsl(var(--sidebar))",
+              display: sidebarCollapsed ? "none" : "flex",
+            }}
           >
             {/* Page title */}
             <div
@@ -454,61 +630,22 @@ export default function MainPage() {
             </div>
             {/* Page config portal renders here */}
             <div ref={sidebarRef} className="flex-1 min-h-0 overflow-y-auto" style={{ paddingLeft: 16, paddingRight: 16 }} />
-            {/* Backend status at bottom */}
-            <div className="flex-shrink-0 p-4 rounded-md" style={{ margin: "16px 16px 16px 24px", border: "1px solid hsl(var(--border))", background: "hsl(var(--card))" }}>
-              <div className="flex items-center justify-between gap-2">
-                <div>
-                  <div className="text-xs" style={{ color: "hsl(var(--muted-foreground))" }}>{t('backend.service')}</div>
-                  <div className="mt-1 text-sm font-medium">
-                    {backendStatus === "running" ? t('backend.connected') : backendStatus === "starting" ? t('backend.connecting') : t('backend.disconnected')}
-                  </div>
-                </div>
-                <div
-                  className={cn("w-2.5 h-2.5 rounded-full", backendStatus === "running" ? "animate-pulse" : "")}
-                  style={{
-                    background: backendStatus === "running" ? "hsl(var(--success))"
-                      : backendStatus === "error" ? "hsl(var(--destructive))"
-                      : backendStatus === "starting" ? "hsl(var(--warning))"
-                      : "hsl(var(--muted-foreground))",
-                  }}
-                />
-              </div>
-              <div className="mt-2 text-xs leading-5" style={{ color: "hsl(var(--muted-foreground))" }}>
-                {backendStatus === "error" ? backendMessage || t('backend.errorHint') : t('backend.hint')}
-              </div>
-              {backendStatus === "running" ? (
-                <button
-                  onClick={handleStopBackend}
-                  className="mt-2 w-full flex items-center justify-center gap-2 h-8 rounded-md text-sm"
-                  style={{ background: "rgba(197, 15, 31, 0.12)", color: "hsl(var(--destructive))", border: "1px solid rgba(197, 15, 31, 0.24)" }}
-                >
-                  <Square className="w-3.5 h-3.5" />
-                  {t('backend.stop')}
-                </button>
-              ) : (
-                <button
-                  onClick={handleStartBackend}
-                  className="mt-2 w-full flex items-center justify-center gap-2 h-8 rounded-md text-sm"
-                  style={{ background: "hsl(var(--primary))", color: "white" }}
-                >
-                  <Play className="w-3.5 h-3.5" />
-                  {t('backend.start')}
-                </button>
-              )}
-            </div>
           </aside>
         </div>
         {/* ── 拖拽调宽把手 ── */}
         <div
-          className="w-1 flex-shrink-0 cursor-col-resize transition-colors"
-          style={{ background: "hsl(var(--border))" }}
+          className="w-1 flex-shrink-0 rounded-full cursor-col-resize transition-colors"
+          style={{ background: "hsl(var(--border))", display: sidebarCollapsed ? "none" : undefined }}
           onMouseDown={handleResizeMouseDown}
           onMouseEnter={(e) => (e.currentTarget.style.background = "hsl(var(--primary))")}
           onMouseLeave={(e) => { if (!isResizing.current) e.currentTarget.style.background = "hsl(var(--border))"; }}
         />
         <SidebarPortalCtx.Provider value={sidebarEl}>
-          <div className="flex-1 min-w-0 overflow-hidden" style={{ background: "hsl(var(--editor))" }}>
-            <div className="h-full overflow-auto" style={{ padding: "10px 16px" }}>
+          <div
+            className="flex-1 min-w-0 overflow-hidden rounded-xl"
+            style={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))" }}
+          >
+            <div className="h-full overflow-auto" style={{ padding: "12px 18px 18px" }}>
               {pages[activePage as PageId]}
             </div>
           </div>
@@ -519,25 +656,23 @@ export default function MainPage() {
         className="flex-shrink-0 flex items-center gap-3 px-4 text-xs"
         style={{ height: 24, background: "hsl(var(--card))", borderTop: "1px solid hsl(var(--border))", color: "hsl(var(--muted-foreground))" }}
       >
-        <div className="flex items-center gap-1.5">
-          <div
-            className={cn("w-1.5 h-1.5 rounded-full", backendStatus === "running" ? "animate-pulse" : "")}
-            style={{ background: statusColor }}
-          />
-          <span>{statusText}</span>
-        </div>
-        <span style={{ color: "hsl(var(--border))" }}>·</span>
-        <span>{config?.mode === "conda" ? "Conda" : "Manual"}</span>
-        <span style={{ color: "hsl(var(--border))" }}>·</span>
-        <span>:{config?.port ?? DEFAULT_BACKEND_PORT}</span>
-        {backendStatus === "error" && backendMessage && (
-          <>
-            <span style={{ color: "hsl(var(--border))" }}>·</span>
-            <span style={{ color: "hsl(var(--destructive))" }}>{backendMessage}</span>
-          </>
-        )}
         <div className="flex-1" />
-        <span style={{ color: "hsl(var(--border))" }}>v{appVersion}</span>
+        {/* 滚动提示：占状态栏 1/3 宽并居中 */}
+        <div className="min-w-0" style={{ width: "33%" }}>
+          <StatusTipMarquee />
+        </div>
+        <div className="flex-1 min-w-0 flex items-center justify-end gap-3">
+          {backendStatus === "error" && backendMessage && (
+            <span className="truncate" style={{ color: "hsl(var(--destructive))" }}>{backendMessage}</span>
+          )}
+          <span
+            className="truncate flex-shrink-0"
+            style={{ color: "hsl(var(--muted-foreground))" }}
+            title={config?.conda?.envPath ?? config?.pythonExe ?? ""}
+          >
+            {config?.conda?.envName ?? config?.pythonExe ?? ""}
+          </span>
+        </div>
       </div>
       {/* ── 检查更新弹窗 ── */}
       <UpdateDialog
@@ -573,7 +708,7 @@ export default function MainPage() {
             </div>
             {/* Tabs */}
             <div className="flex flex-shrink-0" style={{ borderBottom: '1px solid hsl(var(--border))' }}>
-              {(['env', 'about'] as const).map(tab => (
+              {(['env', 'deps', 'about'] as const).map(tab => (
                 <button
                   key={tab}
                   onClick={() => setSettingsTab(tab)}
@@ -584,7 +719,11 @@ export default function MainPage() {
                     background: 'transparent',
                   }}
                 >
-                  {tab === 'env' ? t('settings.tabEnv') : t('settings.tabAbout')}
+                  {tab === 'env'
+                    ? t('settings.tabEnv')
+                    : tab === 'deps'
+                      ? t('settings.tabDeps')
+                      : t('settings.tabAbout')}
                 </button>
               ))}
             </div>
@@ -674,13 +813,141 @@ export default function MainPage() {
                   </div>
                 </div>
               )}
+              {settingsTab === 'deps' && (
+                <div className="flex flex-col gap-3">
+                  {/* 概览 + AI 开关 */}
+                  <div className="p-3 rounded-lg" style={{ background: 'hsl(var(--accent))', border: '1px solid hsl(var(--border))' }}>
+                    <div className="flex items-center gap-2">
+                      <Package className="w-3.5 h-3.5" style={{ color: 'hsl(var(--primary))' }} />
+                      <span className="text-sm font-semibold">{t('settings.depsTitle')}</span>
+                      {deps?.platform && (
+                        <span className="text-xs ml-auto flex-shrink-0" style={{ color: 'hsl(var(--muted-foreground))' }}>
+                          {deps.platform}
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-xs mt-1 break-all" style={{ color: 'hsl(var(--muted-foreground))' }}>
+                      {t('settings.depsPython', {
+                        required: deps?.python_spec ?? '3.10',
+                        current: deps?.python_version ?? '-',
+                      })}
+                    </div>
+                    <label className="flex items-center gap-2 mt-2 text-xs cursor-pointer" style={{ color: 'hsl(var(--muted-foreground))' }}>
+                      <input
+                        type="checkbox"
+                        checked={depsIncludeAI}
+                        onChange={(e) => setDepsIncludeAI(e.target.checked)}
+                        className="accent-blue-500"
+                      />
+                      {t('settings.depsIncludeAI')}
+                    </label>
+                  </div>
+
+                  {depsLoading && (
+                    <div className="flex items-center justify-center gap-2 py-6 text-sm" style={{ color: 'hsl(var(--muted-foreground))' }}>
+                      <RefreshCw className="w-4 h-4 animate-spin" />
+                      {t('common.loading')}
+                    </div>
+                  )}
+
+                  {!depsLoading && depsError && (
+                    <div className="flex items-center gap-2 text-xs px-3 py-2 rounded-md" style={{ background: 'hsl(var(--destructive) / 0.12)', color: 'hsl(var(--destructive))' }}>
+                      <span className="flex-1 break-all">{depsError}</span>
+                      <button
+                        onClick={() => void loadDeps(depsIncludeAI)}
+                        className="flex-shrink-0 px-2 py-0.5 rounded"
+                        style={{ background: 'hsl(var(--muted))', color: 'hsl(var(--muted-foreground))' }}
+                      >
+                        {t('common.retry')}
+                      </button>
+                    </div>
+                  )}
+
+                  {!depsLoading && deps?.groups?.map((group) => (
+                    <div key={group.id}>
+                      <div className="text-[10px] uppercase tracking-[0.12em] mb-1.5 flex items-center gap-2"
+                        style={{ color: 'hsl(var(--muted-foreground))' }}>
+                        {group.title}
+                        {group.enabled === false && (
+                          <span className="normal-case tracking-normal" style={{ color: 'hsl(var(--warning))' }}>
+                            {t('settings.depsDisabled')}
+                          </span>
+                        )}
+                      </div>
+                      <div className="rounded-lg overflow-hidden" style={{ border: '1px solid hsl(var(--border))' }}>
+                        {group.items.map((item, idx) => {
+                          const installed = Boolean(item.installed);
+                          return (
+                            <div
+                              key={item.name}
+                              className="px-2.5 py-1.5"
+                              style={{ borderTop: idx > 0 ? '1px solid hsl(var(--border))' : undefined }}
+                            >
+                              <div className="flex items-center gap-2">
+                                <span className="text-xs font-mono truncate">{item.name}</span>
+                                {item.spec && (
+                                  <span className="text-[10px] font-mono flex-shrink-0" style={{ color: 'hsl(var(--muted-foreground))' }}>
+                                    {item.spec}
+                                  </span>
+                                )}
+                                <span
+                                  className="text-[10px] ml-auto flex-shrink-0"
+                                  style={{ color: installed ? 'hsl(var(--success))' : 'hsl(var(--muted-foreground))' }}
+                                  title={item.installed || undefined}
+                                >
+                                  {installed ? `✓ ${item.installed}` : t('settings.depsNotInstalled')}
+                                </span>
+                              </div>
+                              {item.note && (
+                                <div className="text-[10px] mt-0.5 leading-4" style={{ color: 'hsl(var(--muted-foreground))' }}>
+                                  {item.note}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ))}
+
+                  {!depsLoading && deps && (
+                    <>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => void handleExportEnvYaml()}
+                          className="flex-1 h-9 rounded-md text-sm flex items-center justify-center gap-2"
+                          style={{ background: 'hsl(var(--primary))', color: 'hsl(var(--primary-foreground))' }}
+                        >
+                          <Download className="w-3.5 h-3.5" />
+                          {t('settings.depsExport')}
+                        </button>
+                        <button
+                          onClick={() => void openExternal(EASY_CONDA_URL)}
+                          className="h-9 px-3 rounded-md text-xs flex items-center gap-1.5 flex-shrink-0"
+                          style={{ background: 'hsl(var(--muted))', border: '1px solid hsl(var(--border))', color: 'hsl(var(--muted-foreground))' }}
+                          title={t('settings.depsEasyCondaHint')}
+                        >
+                          Easy Conda
+                          <ExternalLink className="w-3 h-3" />
+                        </button>
+                      </div>
+                      {depsExported && (
+                        <div className="text-[10px] break-all" style={{ color: 'hsl(var(--success))' }}>
+                          {t('settings.depsExported')}: {depsExported}
+                        </div>
+                      )}
+                      <div className="text-[10px] leading-4" style={{ color: 'hsl(var(--muted-foreground))' }}>
+                        {t('settings.depsEasyCondaHint')}
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
               {settingsTab === 'about' && (
                 <div className="flex flex-col gap-5 py-1">
                   {/* 应用信息 */}
                   <div className="flex items-center gap-3">
-                    <div className="w-11 h-11 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: 'hsl(var(--primary))' }}>
-                      <Cpu className="w-6 h-6" style={{ color: 'white' }} />
-                    </div>
+                    <img src="/app-icon.svg" alt="Easy Dataset" className="w-11 h-11 rounded-xl flex-shrink-0" />
                     <div className="min-w-0">
                       <div className="text-base font-semibold">Easy Dataset</div>
                       <div className="text-xs mt-0.5" style={{ color: 'hsl(var(--muted-foreground))' }}>
